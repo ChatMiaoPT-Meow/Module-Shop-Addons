@@ -10,6 +10,7 @@
 | 游戏 / 加载器 | Minecraft 1.21.1 · NeoForge 21.1.x |
 | 前置 | **模块商店 1.0.3+**（两端）· **AtomLib 0.1.0-beta**（仅客户端，模块商店本来就需要） |
 | 许可 | MIT |
+| 主体仓库 | [ChatMiaoPT-Meow/Module-Shop](https://github.com/ChatMiaoPT-Meow/Module-Shop) |
 
 装上之后，商店主界面左侧功能区会多出一个 **「红包」** 条目。点它，发红包的表单直接显示在商店右侧内容区，
 和其它模块一样用 AtomLib 绘制（红色信封头、分段按钮、Skija 输入框）。AtomLib 不可用（非 Windows）时改为弹出原版界面。
@@ -107,17 +108,17 @@ src/main/resources/assets/module_shop_redpacket/lang/   zh_cn / en_us
 
 ## 构建
 
-先在仓库根目录构建模块商店（得到 `build/libs/module_shop-1.0.3.jar` 和公共 API jar `module_shop-1.0.3-api.jar`），然后：
+本仓库可以单独构建，只需要模块商店的**公共 API jar**（`module_shop-1.0.3-api.jar`，含 UI 套件）。任选一种方式提供：
+
+1. 把 `module_shop-1.0.3-api.jar` 放进本仓库的 `libs/`（想用 `runClient` 一起加载主体，就把 `module_shop-1.0.3.jar` 也放进去）；
+2. 或者指向本地已构建的模块商店主仓库：`./gradlew build -Pmodule_shop_root=../Module-Shop`。
 
 ```bash
-cd addons/red-packet
 ./gradlew build          # 产物：build/libs/module_shop_redpacket-1.0.0.jar
 ```
 
-附属**只对公共 API jar（含 UI 套件）+ AtomLib / Skija 编译**，这些 jar 的路径由 `build.gradle` 从仓库根目录的
-`gradle.properties` 自动推出（主体版本号、AtomLib 版本）——**主体升级后直接重新构建即可，不用改任何配置**。
-AtomLib 从主体下载好的本地 Maven 仓库（`.atomlib/maven`）取，Skija 作为它的传递依赖从 Maven Central 取。
-需要对别处的 jar 编译时用 `-Pmodule_shop_api_jar=...`（以及 `module_shop_jar` / `atomlib_maven`）覆盖。
+- 编译所用的主体版本由 `gradle.properties` 的 `module_shop_version` 决定；也可以用 `-Pmodule_shop_api_jar=<文件>` 直接指定。
+- AtomLib 由 `gradle/atomlib.gradle` 在第一次构建时自动下载 release 包并做 SHA-256 校验，解到 `.atomlib/maven`（与模块商店主仓库同一套脚本）；Skija 作为它的传递依赖从 Maven Central 取。
 
 ### 与主体版本的兼容
 

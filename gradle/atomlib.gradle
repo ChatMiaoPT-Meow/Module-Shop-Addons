@@ -1,0 +1,122 @@
+// =====================================================================================
+// AtomLib（客户端 UI 前置库）接线
+//
+// 与 AtomChat 使用同一个已发布版本（0.1.0-beta / beta3），玩家两个 mod 可以共用同一个 AtomLib jar。
+// 版本与校验值固定在 gradle.properties：atomlib_version / atomlib_input_url / atomlib_input_sha256 / atomlib_jar_sha256。
+//
+// Maven 输入目录的来源（按优先级）：
+//   1. -PatomlibMavenRepo=<目录> 或环境变量 ATOMLIB_MAVEN_REPO（与 AtomChat 相同的约定）
+//   2. 默认 <项目>/.atomlib/maven：缺失时自动下载 release 包、校验 SHA-256，只解出 NeoForge 1.21.1 构件
+//
+// AtomLib 只在客户端使用：代码只能出现在 client 包，neoforge.mods.toml 里声明 side="CLIENT"。
+// 本 mod 的 jar 不打包 AtomLib / Skija / Yoga（compileOnly），由玩家安装 AtomLib jar 提供。
+// =====================================================================================
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.zip.ZipInputStream
+
+def atomlibGroup = 'com.atom.lib'
+def atomlibArtifact = 'atomlib-1.21.1-neoforge'
+def atomlibVersion = project.atomlib_version.toString()
+def atomlibCoordinate = "${atomlibGroup}:${atomlibArtifact}:${atomlibVersion}".toString()
+
+static String sha256Of(File file) {
+    def digest = MessageDigest.getInstance('SHA-256')
+    file.withInputStream { input ->
+        byte[] buffer = new byte[1 << 16]
+        int read
+        while ((read = input.read(buffer)) > 0) digest.update(buffer, 0, read)
+    }
+    return digest.digest().encodeHex().toString()
+}
+
+def explicitRepo = providers.gradleProperty('atomlibMavenRepo')
+        .orElse(providers.environmentVariable('ATOMLIB_MAVEN_REPO'))
+File repoDir = explicitRepo.isPresent() ? file(explicitRepo.get()) : file('.atomlib/maven')
+def artifactDir = new File(repoDir, "${atomlibGroup.replace('.', '/')}/${atomlibArtifact}/${atomlibVersion}")
+def jarFile = new File(artifactDir, "${atomlibArtifact}-${atomlibVersion}.jar")
+
+if (!jarFile.isFile()) {
+    if (explicitRepo.isPresent()) {
+        throw new GradleException("AtomLib Maven 目录里没有 ${atomlibCoordinate}：${repoDir}")
+    }
+    // 一次性准备：下载 → 校验 → 只解出 NeoForge 构件（release 包约 100MB，含三个平台）。
+    def cacheDir = file('.atomlib')
+    cacheDir.mkdirs()
+    def zip = new File(cacheDir, "atomlib-input-${atomlibVersion}.zip")
+    def expectedZip = project.atomlib_input_sha256.toString()
+    if (!zip.isFile() || sha256Of(zip) != expectedZip) {
+        logger.lifecycle("[module-shop] 下载 AtomLib ${atomlibVersion} 输入包：${project.atomlib_input_url}")
+        def partial = new File(cacheDir, zip.name + '.part')
+        new URL(project.atomlib_input_url.toString()).openStream().withCloseable { input ->
+            Files.copy(input, partial.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+        def actual = sha256Of(partial)
+        if (actual != expectedZip) {
+            partial.delete()
+            throw new GradleException("AtomLib 输入包 SHA-256 不符：期望 ${expectedZip}，实际 ${actual}")
+        }
+        Files.move(partial.toPath(), zip.toPath(), StandardCopyOption.REPLACE_EXISTING)
+    }
+    def prefix = "${atomlibGroup.replace('.', '/')}/${atomlibArtifact}/"
+    new ZipInputStream(new FileInputStream(zip)).withCloseable { zin ->
+        def entry
+        while ((entry = zin.nextEntry) != null) {
+            if (entry.directory || !entry.name.startsWith(prefix) || entry.name.contains('..')) continue
+            def out = new File(repoDir, entry.name)
+            out.parentFile.mkdirs()
+            Files.copy(zin, out.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+    zip.delete() // 只保留解出的 NeoForge 构件
+    logger.lifecycle("[module-shop] AtomLib 已解出到 ${repoDir}")
+}
+
+repositories {
+    exclusiveContent {
+        forRepository { maven { name = 'AtomLibInput'; url = repoDir.toURI() } }
+        filter { includeVersion(atomlibGroup, atomlibArtifact, atomlibVersion) }
+    }
+    exclusiveContent {
+        // Skija 只从 Maven Central 取；LWJGL 由 Minecraft 自带，lwjgl-yoga 也在 Central。
+        forRepository { maven { name = 'AtomLibUpstream'; url = 'https://repo.maven.apache.org/maven2/' } }
+        filter { includeGroup 'io.github.humbleui' }
+    }
+    // lwjgl-yoga（AtomLib 的传递依赖）
+    mavenCentral()
+}
+
+dependencies {
+    // 编译期使用；开发环境运行时（runClient）也加载，正式 jar 不打包。
+    compileOnly atomlibCoordinate
+    localRuntime atomlibCoordinate
+}
+
+// 校验实际参与构建的 AtomLib jar 与固定值一致（AtomChat 同款）。
+// 注意：开启了 configuration cache，执行阶段不能调用脚本里定义的方法，所以这里内联计算。
+def original = configurations.detachedConfiguration(dependencies.create(atomlibCoordinate))
+original.transitive = false
+def expectedJar = project.atomlib_jar_sha256.toString()
+tasks.register('verifyAtomLibInput') {
+    group = 'verification'
+    description = 'Checks the AtomLib jar against the pinned SHA-256.'
+    def jarFiles = original
+    inputs.files(jarFiles)
+    inputs.property('expectedSha256', expectedJar)
+    doLast {
+        def digest = MessageDigest.getInstance('SHA-256')
+        jarFiles.singleFile.withInputStream { input ->
+            byte[] buffer = new byte[1 << 16]
+            int read
+            while ((read = input.read(buffer)) > 0) digest.update(buffer, 0, read)
+        }
+        def actual = digest.digest().encodeHex().toString()
+        if (actual != expectedJar) {
+            throw new GradleException("AtomLib jar SHA-256 不符：期望 ${expectedJar}，实际 ${actual}")
+        }
+    }
+}
+tasks.named('check') { dependsOn 'verifyAtomLibInput' }
+
+ext.atomlibVersionRange = project.atomlib_version_range.toString()

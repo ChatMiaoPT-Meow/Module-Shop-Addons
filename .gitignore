@@ -1,0 +1,9 @@
+.gradle/
+build/
+run/
+runs/
+.atomlib/
+.idea/
+*.iml
+out/
+libs/*.jar
