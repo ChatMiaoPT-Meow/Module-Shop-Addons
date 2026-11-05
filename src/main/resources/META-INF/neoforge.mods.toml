@@ -5,7 +5,7 @@ license="MIT"
 [[mods]]
 modId="module_shop_redpacket"
 version="1.0.0"
-displayName="模块商店 · 拼手气红包"
+displayName="module-shop: Red envelope"
 authors="Ar_Zhe"
 description='''
 模块商店（Module Shop）附属：红包。
