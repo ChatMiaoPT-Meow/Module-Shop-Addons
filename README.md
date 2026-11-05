@@ -1,7 +1,27 @@
-# 模块商店附属 · 拼手气红包
+# module-shop: Red envelope · 拼手气红包
+
+**模块商店（Module Shop）的附属模组**：在商店里发拼手气 / 均分红包，红包出现在聊天栏，点击或发口令领取。
+
+| 项 | 值 |
+| --- | --- |
+| 显示名 | module-shop: Red envelope |
+| modid | `module_shop_redpacket`（NeoForge 的 modid 只能是小写字母、数字、下划线） |
+| 版本 | 1.0.0 |
+| 游戏 / 加载器 | Minecraft 1.21.1 · NeoForge 21.1.x |
+| 前置 | **模块商店 1.0.3+**（两端）· **AtomLib 0.1.0-beta**（仅客户端，模块商店本来就需要） |
+| 许可 | MIT |
 
 装上之后，商店主界面左侧功能区会多出一个 **「红包」** 条目。点它，发红包的表单直接显示在商店右侧内容区，
 和其它模块一样用 AtomLib 绘制（红色信封头、分段按钮、Skija 输入框）。AtomLib 不可用（非 Windows）时改为弹出原版界面。
+
+## 安装
+
+| 位置 | 放进 `mods/` 的文件 |
+| --- | --- |
+| 服务端 | `module_shop-1.0.3.jar` + `module_shop_redpacket-1.0.0.jar`（服务端**不需要** AtomLib） |
+| 客户端 | 上面两个 + `atomlib-1.21.1-neoforge-0.1.0-beta.jar` |
+
+两端都要装红包附属（界面在客户端，红包逻辑在服务端）。
 
 ## 玩法
 
@@ -51,6 +71,39 @@
   每笔收支都会出现在玩家账单里（API 自动记账）。
 - 金额在发出时就拆好并写进存档（`data/module_shop_redpacket.dat`），所有份额之和恒等于总额；重启服务器后照样能领、照样到期退款。
 - 每人每个红包只能领一次；校验全部在服务端。
+
+## 使用的库
+
+| 库 | 版本 | 用途 | 依赖方式 | 许可 |
+| --- | --- | --- | --- | --- |
+| NeoForge | 21.1.248 | 模组加载、事件、网络包（`CustomPacketPayload`）、配置（`ModConfigSpec`） | 运行环境 | LGPL-2.1 |
+| Minecraft | 1.21.1 | 指令（Brigadier）、存档（`SavedData`）、聊天组件与点击事件 | 运行环境 | — |
+| **模块商店公共 API** | 1.1.0（模块商店 1.0.3） | 动钱：`economy().take / add / balance / balanceView`；满额转邮件：`mail().sendMoneyMail`；侧栏页面：`api.client.ShopModules / AddonPage / ShopTheme` | `compileOnly module_shop-<版本>-api.jar`（只含公共 API 与 UI 套件） | MIT |
+| **模块商店 UI 套件** | 随模块商店 | `Draw / Text / SkiaFrame / Button / SkiaTextField / Motion / ScrollController`：和内置页面同一套控件 | 同上（打包在 API jar 里） | MIT |
+| **AtomLib** | 0.1.0-beta（beta3） | 客户端 Skija 渲染桥、字体（Noto Sans SC）与文字排版 | `compileOnly`，运行时由客户端安装的 AtomLib 提供 | Apache-2.0 |
+| Skija | 0.143.18 | `Canvas` 绘制（随 AtomLib 内置，只带 Windows 原生库） | `compileOnly`（从 AtomLib 里解出） | Apache-2.0 |
+| ModDevGradle | 2.0.144 | 构建 | Gradle 插件 | LGPL-2.1 |
+| Parchment | 2024.11.17 | 参数名映射（只影响开发） | Gradle | CC0 |
+
+红包本身没有打包任何第三方库，jar 里只有自己的类与语言文件。
+
+## 源码结构
+
+```
+src/main/java/cn/autoforged/module_shop_redpacket/
+  RedPacketMod.java            入口：注册配置 / 网络 / 指令 / 聊天口令 / tick；检查公共 API ≥ 1.1
+  RedPacketManager.java        服务端逻辑：发、领、口令、详情、过期退款（只调用 ModuleShopApi）
+  RedPacketConfig.java         服务端配置
+  data/RedPacket*.java         红包数据、存档（SavedData）、金额拆分算法
+  network/RedPacketNetwork.java  两个 NBT 包（C2S 请求 / S2C 回包），不占用模块商店的通道
+  client/
+    RedPacketClient.java       ShopModules.registerPage(...) 挂进侧栏；处理回包
+    RedPacketPage.java         内容区页面（AtomLib）
+    RedPacketDetailAtomScreen  详情界面（AtomLib）
+    RedPacketSendScreen / RedPacketDetailScreen   无 AtomLib 时的原版回退界面
+    RedPacketState.java        两套界面共用的表单状态
+src/main/resources/assets/module_shop_redpacket/lang/   zh_cn / en_us
+```
 
 ## 构建
 
