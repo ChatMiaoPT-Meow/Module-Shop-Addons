@@ -1,6 +1,7 @@
 # 模块商店附属 · 拼手气红包
 
-装上之后，商店主界面左侧功能区会多出一个 **「红包」** 条目。
+装上之后，商店主界面左侧功能区会多出一个 **「红包」** 条目。点它，发红包的表单直接显示在商店右侧内容区，
+和其它模块一样用 AtomLib 绘制（红色信封头、分段按钮、Skija 输入框）。AtomLib 不可用（非 Windows）时改为弹出原版界面。
 
 ## 玩法
 
@@ -21,7 +22,7 @@
    - 普通红包：点 **[ 领取红包 ]** 即可；
    - 口令红包：在聊天栏发送口令（点 **[ 发送口令领取 ]** 会自动把口令填进聊天框）。
    - 领到多少只有**自己**能看到：`你领取了 Steve 的红包，获得 123 星币`。
-4. **详情**：点 **[ 详情 ]** 打开详情界面，看到发送者、祝福语、总额、已领 x/y 个、
+4. **详情**：点 **[ 详情 ]** 打开详情界面（AtomLib 绘制），看到发送者、祝福语、总额、已领 x/y 个、
    每个人领了多少 / 什么时候领的、自己领到多少，领完后标出 **手气最佳**。
 5. 红包被领完时聊天栏会公告用时和手气最佳；**过期没领完的部分自动退回**给发送者。
 
@@ -60,7 +61,7 @@ cd addons/red-packet
 ./gradlew build          # 产物：build/libs/module_shop_redpacket-1.0.0.jar
 ```
 
-附属**只对公共 API jar 编译**（`gradle.properties` 的 `module_shop_api_jar`），代码里引用不到模块商店的任何内部类；
+附属**只对公共 API jar（含 UI 套件）+ AtomLib / Skija 编译**（`gradle.properties` 的 `module_shop_api_jar`），代码里引用不到模块商店的任何内部类；
 完整 jar（`module_shop_jar`）只用于 `runClient` / `runServer` 开发运行。
 服务端和客户端都要装（需要模块商店 **1.0.3+**）。
 
@@ -68,7 +69,9 @@ cd addons/red-packet
 
 这个附属同时是「侧栏扩展点」的完整示例：
 
-- `client/RedPacketClient.java`：`ShopModules.register(...)` 把「红包」挂进侧栏；
+- `client/RedPacketClient.java`：`ShopModules.registerPage(...)` 把「红包」作为内容区页面挂进侧栏；
+- `client/RedPacketPage.java`：内容区页面（`AddonPage`），用模块商店的 UI 套件与 `ShopTheme` 绘制；
+- `client/RedPacketDetailAtomScreen.java`：AtomLib 版详情界面；`RedPacketSendScreen` / `RedPacketDetailScreen` 是无 AtomLib 时的回退；
 - `RedPacketManager.java`：只用 `ModuleShopApi`（`economy()` / `mail()`）动钱；
 - `RedPacketMod.java`：启动时用 `ApiVersion.describe()` 检查公共 API ≥ 1.1；
 - `network/RedPacketNetwork.java`：附属自己的网络包（不占用模块商店的通道）。

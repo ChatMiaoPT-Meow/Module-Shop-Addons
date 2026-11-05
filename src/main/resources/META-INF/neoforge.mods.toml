@@ -33,3 +33,11 @@ description='''
     versionRange="[1.0.3,)"
     ordering="AFTER"
     side="BOTH"
+
+[[dependencies.module_shop_redpacket]]
+    modId="atomlib"
+    type="required"
+    versionRange="[0.1.0-beta,)"
+    ordering="AFTER"
+    side="CLIENT"
+    reason="红包页面与详情界面用 AtomLib 绘制（与模块商店相同的前置库）。"

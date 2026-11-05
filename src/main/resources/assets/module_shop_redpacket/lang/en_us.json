@@ -1,6 +1,5 @@
 {
   "tab.module_shop_redpacket.red_packet": "Red Packet",
-
   "msg.module_shop_redpacket.tag": "[Red Packet]",
   "msg.module_shop_redpacket.sent_lucky": "%s sent a lucky red packet",
   "msg.module_shop_redpacket.sent_even": "%s sent a red packet",
@@ -36,7 +35,6 @@
   "msg.module_shop_redpacket.cooldown": "Too fast, try again in %s s",
   "msg.module_shop_redpacket.insufficient": "Not enough money: need %s %s, you have %s",
   "msg.module_shop_redpacket.take_failed": "Payment failed (%s)",
-
   "gui.module_shop_redpacket.send_title": "Send Red Packet",
   "gui.module_shop_redpacket.mode_lucky": "Lucky (random)",
   "gui.module_shop_redpacket.mode_even": "Even split",
@@ -58,7 +56,6 @@
   "gui.module_shop_redpacket.preview_even": "%s shares, %s %s each",
   "gui.module_shop_redpacket.preview_even_rem": "%s shares, %s~%s %s each",
   "gui.module_shop_redpacket.preview_none": "Unclaimed money is refunded after %sh %sm",
-
   "gui.module_shop_redpacket.detail_title": "Red Packet Details",
   "gui.module_shop_redpacket.detail_from": "Red packet from %s",
   "gui.module_shop_redpacket.detail_mine": "You got (%s)",
@@ -69,5 +66,7 @@
   "gui.module_shop_redpacket.status_done": "%s shares, %s %s, all claimed in %s",
   "gui.module_shop_redpacket.status_expired": "Expired: %s/%s claimed (%s/%s), %s refunded",
   "gui.module_shop_redpacket.detail_empty": "Nobody has claimed yet",
-  "gui.module_shop_redpacket.best": "Luckiest"
+  "gui.module_shop_redpacket.best": "Luckiest",
+  "gui.module_shop_redpacket.sent_ok": "Red packet sent — everyone can see it in chat",
+  "gui.module_shop_redpacket.hint": "Unclaimed money is refunded on expiry"
 }

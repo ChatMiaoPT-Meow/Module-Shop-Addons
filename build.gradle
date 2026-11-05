@@ -33,6 +33,9 @@ configurations {
 dependencies {
     // 只对模块商店的公共 API 层编译：ModuleShopApi（经济 / 邮件）+ api.client.ShopModules（侧栏入口）。
     compileOnly files(project.findProperty('module_shop_api_jar'))
+    // 内容区页面 / 详情界面用 AtomLib（Skija）绘制，和模块商店内置页面同一套 UI 套件。
+    compileOnly files(project.findProperty('atomlib_jar'))
+    compileOnly files(project.findProperty('skija_jar'))
     localRuntime files(project.findProperty('module_shop_jar'))
 }
 

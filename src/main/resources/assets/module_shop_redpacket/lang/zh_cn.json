@@ -1,6 +1,5 @@
 {
   "tab.module_shop_redpacket.red_packet": "红包",
-
   "msg.module_shop_redpacket.tag": "[红包]",
   "msg.module_shop_redpacket.sent_lucky": "%s 发了一个拼手气红包",
   "msg.module_shop_redpacket.sent_even": "%s 发了一个普通红包",
@@ -36,7 +35,6 @@
   "msg.module_shop_redpacket.cooldown": "发得太快了，%s 秒后再试",
   "msg.module_shop_redpacket.insufficient": "余额不足：需要 %s %s，当前 %s",
   "msg.module_shop_redpacket.take_failed": "扣款失败（%s）",
-
   "gui.module_shop_redpacket.send_title": "发红包",
   "gui.module_shop_redpacket.mode_lucky": "拼手气红包",
   "gui.module_shop_redpacket.mode_even": "普通红包（均分）",
@@ -58,7 +56,6 @@
   "gui.module_shop_redpacket.preview_even": "%s 个红包，每个 %s %s",
   "gui.module_shop_redpacket.preview_even_rem": "%s 个红包，每个 %s~%s %s",
   "gui.module_shop_redpacket.preview_none": "未领完的部分 %s 小时 %s 分后自动退回",
-
   "gui.module_shop_redpacket.detail_title": "红包详情",
   "gui.module_shop_redpacket.detail_from": "%s 的红包",
   "gui.module_shop_redpacket.detail_mine": "你领到的（%s）",
@@ -69,5 +66,7 @@
   "gui.module_shop_redpacket.status_done": "%s 个红包共 %s %s，%s 被领完",
   "gui.module_shop_redpacket.status_expired": "已过期：领了 %s/%s 个（%s/%s），退回 %s",
   "gui.module_shop_redpacket.detail_empty": "还没有人领取",
-  "gui.module_shop_redpacket.best": "手气最佳"
+  "gui.module_shop_redpacket.best": "手气最佳",
+  "gui.module_shop_redpacket.sent_ok": "红包已发出，聊天栏里大家都能看到",
+  "gui.module_shop_redpacket.hint": "未领完的部分到期自动退回"
 }
