@@ -31,8 +31,8 @@ configurations {
 }
 
 dependencies {
-    // 只编译期依赖「模块商店」主体：公共 API（ModuleShopApi）+ 客户端扩展点（ShopModules）。
-    compileOnly files(project.findProperty('module_shop_jar'))
+    // 只对模块商店的公共 API 层编译：ModuleShopApi（经济 / 邮件）+ api.client.ShopModules（侧栏入口）。
+    compileOnly files(project.findProperty('module_shop_api_jar'))
     localRuntime files(project.findProperty('module_shop_jar'))
 }
 

@@ -28,6 +28,9 @@ public class RedPacketMod {
     public static final String MODID = "module_shop_redpacket";
 
     public RedPacketMod(IEventBus modBus, ModContainer container) {
+        // 只依赖公共 API：主版本 1、次版本 ≥ 1（1.1 起才有侧栏扩展点 ShopModules）。
+        // 注意 ApiVersion 的常量会被 javac 内联成「编译时的值」，所以这里读运行时的 describe()。
+        checkApiVersion(cn.autoforged.module_shop.api.ApiVersion.describe());
         container.registerConfig(ModConfig.Type.SERVER, RedPacketConfig.SPEC);
         modBus.addListener(RedPacketNetwork::register);
         NeoForge.EVENT_BUS.addListener(RedPacketMod::onCommands);
@@ -36,6 +39,24 @@ public class RedPacketMod {
         NeoForge.EVENT_BUS.addListener((ServerStoppedEvent e) -> RedPacketManager.reset());
         if (FMLEnvironment.dist == Dist.CLIENT) {
             cn.autoforged.module_shop_redpacket.client.RedPacketClient.init(modBus);
+        }
+    }
+
+    static void checkApiVersion(String described) {
+        String version = described == null ? "" : described.substring(described.lastIndexOf(' ') + 1);
+        String[] parts = version.split("\\.");
+        int major = parts.length > 0 ? parseInt(parts[0]) : -1;
+        int minor = parts.length > 1 ? parseInt(parts[1]) : -1;
+        if (major != 1 || minor < 1) {
+            throw new IllegalStateException("module_shop_redpacket 需要模块商店公共 API 1.1+，当前：" + described);
+        }
+    }
+
+    private static int parseInt(String text) {
+        try {
+            return Integer.parseInt(text.trim());
+        } catch (NumberFormatException e) {
+            return -1;
         }
     }
 

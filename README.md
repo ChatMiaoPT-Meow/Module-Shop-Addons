@@ -45,20 +45,23 @@
 
 ## 安全性
 
-- 钱全部走模块商店公共 API：发出用 `economy().take`（余额不足整笔失败），领取 / 退款用 `economy().add`（超余额上限会自动转金钱邮件）。
+- 钱全部走模块商店公共 API：发出用 `economy().take`（余额不足整笔失败），领取 / 退款用 `economy().add`；
+  余额已到上限（`LIMIT_EXCEEDED`）时改用 `mail().sendMoneyMail` 发金钱邮件，钱不会卡在红包里。
+  每笔收支都会出现在玩家账单里（API 自动记账）。
 - 金额在发出时就拆好并写进存档（`data/module_shop_redpacket.dat`），所有份额之和恒等于总额；重启服务器后照样能领、照样到期退款。
 - 每人每个红包只能领一次；校验全部在服务端。
 
 ## 构建
 
-先在仓库根目录构建模块商店（得到 `build/libs/module_shop-1.0.3.jar`），然后：
+先在仓库根目录构建模块商店（得到 `build/libs/module_shop-1.0.3.jar` 和公共 API jar `module_shop-1.0.3-api.jar`），然后：
 
 ```bash
 cd addons/red-packet
 ./gradlew build          # 产物：build/libs/module_shop_redpacket-1.0.0.jar
 ```
 
-模块商店 jar 的路径在 `gradle.properties` 的 `module_shop_jar` 里改。
+附属**只对公共 API jar 编译**（`gradle.properties` 的 `module_shop_api_jar`），代码里引用不到模块商店的任何内部类；
+完整 jar（`module_shop_jar`）只用于 `runClient` / `runServer` 开发运行。
 服务端和客户端都要装（需要模块商店 **1.0.3+**）。
 
 ## 给开发者
@@ -66,5 +69,6 @@ cd addons/red-packet
 这个附属同时是「侧栏扩展点」的完整示例：
 
 - `client/RedPacketClient.java`：`ShopModules.register(...)` 把「红包」挂进侧栏；
-- `RedPacketManager.java`：只用 `ModuleShopApi` 动钱，不碰模块商店内部类；
+- `RedPacketManager.java`：只用 `ModuleShopApi`（`economy()` / `mail()`）动钱；
+- `RedPacketMod.java`：启动时用 `ApiVersion.describe()` 检查公共 API ≥ 1.1；
 - `network/RedPacketNetwork.java`：附属自己的网络包（不占用模块商店的通道）。

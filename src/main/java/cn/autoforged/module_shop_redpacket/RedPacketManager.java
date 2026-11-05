@@ -199,8 +199,9 @@ public final class RedPacketManager {
             return;
         }
         long amount = packet.pending.remove(0);
-        ApiResult<Long> added = ModuleShopApi.economy().add(player.getUUID(), amount,
-                "红包 · 领取 " + packet.senderName + " #" + packet.id);
+        ApiResult<?> added = payout(player.getUUID(), amount,
+                "红包 · 领取 " + packet.senderName + " #" + packet.id,
+                "红包：" + packet.senderName + " 的红包（余额已满，转为邮件）");
         if (!added.isOk()) {
             packet.pending.add(0, amount);   // 没入账：份额放回去，别人还能领
             LOGGER.warn("add failed for {}: {} {}", player.getGameProfile().getName(), added.code(), added.message());
@@ -371,7 +372,8 @@ public final class RedPacketManager {
                 left += amount;
             }
             if (left > 0L) {
-                ApiResult<Long> back = ModuleShopApi.economy().add(packet.sender, left, "红包 · 过期退回 #" + packet.id);
+                ApiResult<?> back = payout(packet.sender, left, "红包 · 过期退回 #" + packet.id,
+                        "红包过期退回（余额已满，转为邮件）");
                 if (!back.isOk()) {
                     LOGGER.warn("refund failed for packet {}: {} {}", packet.id, back.code(), back.message());
                     continue;   // 下次再试，钱不丢
@@ -398,6 +400,18 @@ public final class RedPacketManager {
     }
 
     // ================================================================ 工具
+
+    /**
+     * 给玩家入账（只走公共 API）：优先 {@code economy().add}；余额已到上限（{@code LIMIT_EXCEEDED}）时
+     * 改发 {@code mail().sendMoneyMail}，玩家去邮箱领取 —— 钱不会卡在红包里。
+     */
+    private static ApiResult<?> payout(UUID target, long amount, String reason, String mailTitle) {
+        ApiResult<Long> added = ModuleShopApi.economy().add(target, amount, reason);
+        if (added.isOk() || added.code() != ApiErrorCode.LIMIT_EXCEEDED) {
+            return added;
+        }
+        return ModuleShopApi.mail().sendMoneyMail(target, amount, mailTitle, reason);
+    }
 
     private static Component greetingOf(RedPacket packet) {
         return packet.greeting.isEmpty()
