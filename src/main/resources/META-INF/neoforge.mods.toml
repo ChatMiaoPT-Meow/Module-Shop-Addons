@@ -1,0 +1,35 @@
+modLoader="javafml"
+loaderVersion="[1,)"
+license="MIT"
+
+[[mods]]
+modId="module_shop_redpacket"
+version="1.0.0"
+displayName="模块商店 · 拼手气红包"
+authors="Ar_Zhe"
+description='''
+模块商店（Module Shop）附属：红包。
+在商店左侧功能区发红包（拼手气 / 均分，可设口令与祝福语），红包会出现在聊天栏，点击即可领取；
+点「详情」可以查看总额、谁领了、领了多少、手气最佳。过期未领完的部分自动退回。
+'''
+
+[[dependencies.module_shop_redpacket]]
+    modId="neoforge"
+    type="required"
+    versionRange="[21.1,21.2)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.module_shop_redpacket]]
+    modId="minecraft"
+    type="required"
+    versionRange="[1.21.1]"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.module_shop_redpacket]]
+    modId="module_shop"
+    type="required"
+    versionRange="[1.0.3,)"
+    ordering="AFTER"
+    side="BOTH"

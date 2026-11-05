@@ -1,0 +1,40 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.144'
+}
+
+version = mod_version
+group = 'cn.autoforged.module_shop_redpacket'
+base { archivesName = "module_shop_redpacket" }
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+neoForge {
+    version = project.neo_version
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+    runs {
+        client { client() }
+        server { server(); programArgument '--nogui' }
+    }
+    mods {
+        "${mod_id}" { sourceSet sourceSets.main }
+    }
+}
+
+// 开发运行（runClient / runServer）时把模块商店 jar 一起加载；不会写进发布产物的依赖。
+configurations {
+    localRuntime
+    runtimeClasspath.extendsFrom localRuntime
+}
+
+dependencies {
+    // 只编译期依赖「模块商店」主体：公共 API（ModuleShopApi）+ 客户端扩展点（ShopModules）。
+    compileOnly files(project.findProperty('module_shop_jar'))
+    localRuntime files(project.findProperty('module_shop_jar'))
+}
+
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+tasks.withType(ProcessResources).configureEach { filteringCharset = 'UTF-8' }
