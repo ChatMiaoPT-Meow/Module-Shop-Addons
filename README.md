@@ -81,7 +81,7 @@
 | **模块商店公共 API** | 1.1.0（模块商店 1.0.3） | 动钱：`economy().take / add / balance / balanceView`；满额转邮件：`mail().sendMoneyMail`；侧栏页面：`api.client.ShopModules / AddonPage / ShopTheme` | `compileOnly module_shop-<版本>-api.jar`（只含公共 API 与 UI 套件） | MIT |
 | **模块商店 UI 套件** | 随模块商店 | `Draw / Text / SkiaFrame / Button / SkiaTextField / Motion / ScrollController`：和内置页面同一套控件 | 同上（打包在 API jar 里） | MIT |
 | **AtomLib** | 0.1.0-beta（beta3） | 客户端 Skija 渲染桥、字体（Noto Sans SC）与文字排版 | `compileOnly`，运行时由客户端安装的 AtomLib 提供 | Apache-2.0 |
-| Skija | 0.143.18 | `Canvas` 绘制（随 AtomLib 内置，只带 Windows 原生库） | `compileOnly`（从 AtomLib 里解出） | Apache-2.0 |
+| Skija | 0.143.18 | `Canvas` 绘制（运行时随 AtomLib 内置，只带 Windows 原生库） | 编译期作为 AtomLib 的传递依赖从 Maven Central 取 | Apache-2.0 |
 | ModDevGradle | 2.0.144 | 构建 | Gradle 插件 | LGPL-2.1 |
 | Parchment | 2024.11.17 | 参数名映射（只影响开发） | Gradle | CC0 |
 
@@ -116,7 +116,8 @@ cd addons/red-packet
 
 附属**只对公共 API jar（含 UI 套件）+ AtomLib / Skija 编译**，这些 jar 的路径由 `build.gradle` 从仓库根目录的
 `gradle.properties` 自动推出（主体版本号、AtomLib 版本）——**主体升级后直接重新构建即可，不用改任何配置**。
-需要对别处的 jar 编译时用 `-Pmodule_shop_api_jar=...`（以及 `module_shop_jar` / `atomlib_jar` / `skija_jar`）覆盖。
+AtomLib 从主体下载好的本地 Maven 仓库（`.atomlib/maven`）取，Skija 作为它的传递依赖从 Maven Central 取。
+需要对别处的 jar 编译时用 `-Pmodule_shop_api_jar=...`（以及 `module_shop_jar` / `atomlib_maven`）覆盖。
 
 ### 与主体版本的兼容
 

@@ -38,16 +38,20 @@ def atomlibVersion = shopProps.getProperty('atomlib_version', '0.1.0-beta')
 def pick = { String key, String fallback -> (project.findProperty(key) ?: fallback).toString() }
 def shopApiJar = pick('module_shop_api_jar', "${shopRoot}/build/libs/module_shop-${shopVersion}-api.jar")
 def shopJar = pick('module_shop_jar', "${shopRoot}/build/libs/module_shop-${shopVersion}.jar")
-def atomlibJar = pick('atomlib_jar',
-        "${shopRoot}/.atomlib/maven/com/atom/lib/atomlib-1.21.1-neoforge/${atomlibVersion}/atomlib-1.21.1-neoforge-${atomlibVersion}.jar")
-// Skija 的版本跟着 AtomLib 走：主体构建会把它解到 build/atomlib-compile/，这里按文件名匹配，不写死版本。
-def skijaJar = project.findProperty('skija_jar') ?: fileTree("${shopRoot}/build/atomlib-compile") {
-    include 'skija-shared-*.jar'
+// AtomLib 和主体用同一个本地 Maven 仓库（主体构建时下载并校验到 .atomlib/maven）；
+// Skija 等是 AtomLib 的传递依赖，和主体一样从 Maven Central 取，不写死版本。
+def atomlibRepo = file(pick('atomlib_maven', "${shopRoot}/.atomlib/maven"))
+repositories {
+    exclusiveContent {
+        forRepository { maven { name = 'AtomLibInput'; url = atomlibRepo.toURI() } }
+        filter { includeGroup 'com.atom.lib' }
+    }
+    mavenCentral()
 }
 
 tasks.named('compileJava').configure {
     doFirst {
-        [shopApiJar, atomlibJar].each { path ->
+        [shopApiJar].each { path ->
             if (!file(path).isFile()) {
                 throw new GradleException("找不到 ${path}：请先在仓库根目录构建模块商店（./gradlew build），再构建本附属。")
             }
@@ -65,8 +69,7 @@ dependencies {
     // 只对模块商店的公共 API 层编译：ModuleShopApi（经济 / 邮件）+ api.client（侧栏页面 + UI 套件）。
     compileOnly files(shopApiJar)
     // 内容区页面 / 详情界面用 AtomLib（Skija）绘制，和模块商店内置页面同一套 UI 套件。
-    compileOnly files(atomlibJar)
-    compileOnly(skijaJar instanceof String ? files(skijaJar) : skijaJar)
+    compileOnly "com.atom.lib:atomlib-1.21.1-neoforge:${atomlibVersion}"
     localRuntime files(shopJar)
 }
 
