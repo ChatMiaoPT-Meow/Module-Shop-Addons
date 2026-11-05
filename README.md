@@ -61,9 +61,16 @@ cd addons/red-packet
 ./gradlew build          # 产物：build/libs/module_shop_redpacket-1.0.0.jar
 ```
 
-附属**只对公共 API jar（含 UI 套件）+ AtomLib / Skija 编译**（`gradle.properties` 的 `module_shop_api_jar`），代码里引用不到模块商店的任何内部类；
-完整 jar（`module_shop_jar`）只用于 `runClient` / `runServer` 开发运行。
-服务端和客户端都要装（需要模块商店 **1.0.3+**）。
+附属**只对公共 API jar（含 UI 套件）+ AtomLib / Skija 编译**，这些 jar 的路径由 `build.gradle` 从仓库根目录的
+`gradle.properties` 自动推出（主体版本号、AtomLib 版本）——**主体升级后直接重新构建即可，不用改任何配置**。
+需要对别处的 jar 编译时用 `-Pmodule_shop_api_jar=...`（以及 `module_shop_jar` / `atomlib_jar` / `skija_jar`）覆盖。
+
+### 与主体版本的兼容
+
+- 依赖声明是 `module_shop [1.0.3,)`：之后的模块商店版本都能装；
+- 只用公共 API 与 UI 套件，模块商店承诺这两部分在 1.x 内只增不改 → **已发布的红包 jar 在新版本主体上照样能用，不用跟着更新**；
+- 启动时检查公共 API 主版本是 1、次版本 ≥ 1（API 出现不兼容的 2.x 时会明确报错，而不是运行中出问题）；
+- 万一红包页面在某个新版本上出错，商店会停用这个页面并自动改用原版的发红包界面，商店和其它模块不受影响。
 
 ## 给开发者
 

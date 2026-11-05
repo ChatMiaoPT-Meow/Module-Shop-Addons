@@ -24,6 +24,37 @@ neoForge {
     }
 }
 
+// ===================== 模块商店依赖：版本自动跟随主体，升级主体不用改这里 =====================
+// 主体的版本号、AtomLib 版本都从仓库根目录的 gradle.properties 读取，jar 路径由它们推出来；
+// 想对别处的 jar 编译，用 -Pmodule_shop_api_jar=... 等覆盖即可。
+def shopRoot = file('../..')
+def shopProps = new Properties()
+def shopPropsFile = new File(shopRoot, 'gradle.properties')
+if (shopPropsFile.isFile()) {
+    shopPropsFile.withReader('UTF-8') { shopProps.load(it) }
+}
+def shopVersion = shopProps.getProperty('mod_version', '')
+def atomlibVersion = shopProps.getProperty('atomlib_version', '0.1.0-beta')
+def pick = { String key, String fallback -> (project.findProperty(key) ?: fallback).toString() }
+def shopApiJar = pick('module_shop_api_jar', "${shopRoot}/build/libs/module_shop-${shopVersion}-api.jar")
+def shopJar = pick('module_shop_jar', "${shopRoot}/build/libs/module_shop-${shopVersion}.jar")
+def atomlibJar = pick('atomlib_jar',
+        "${shopRoot}/.atomlib/maven/com/atom/lib/atomlib-1.21.1-neoforge/${atomlibVersion}/atomlib-1.21.1-neoforge-${atomlibVersion}.jar")
+// Skija 的版本跟着 AtomLib 走：主体构建会把它解到 build/atomlib-compile/，这里按文件名匹配，不写死版本。
+def skijaJar = project.findProperty('skija_jar') ?: fileTree("${shopRoot}/build/atomlib-compile") {
+    include 'skija-shared-*.jar'
+}
+
+tasks.named('compileJava').configure {
+    doFirst {
+        [shopApiJar, atomlibJar].each { path ->
+            if (!file(path).isFile()) {
+                throw new GradleException("找不到 ${path}：请先在仓库根目录构建模块商店（./gradlew build），再构建本附属。")
+            }
+        }
+    }
+}
+
 // 开发运行（runClient / runServer）时把模块商店 jar 一起加载；不会写进发布产物的依赖。
 configurations {
     localRuntime
@@ -31,12 +62,12 @@ configurations {
 }
 
 dependencies {
-    // 只对模块商店的公共 API 层编译：ModuleShopApi（经济 / 邮件）+ api.client.ShopModules（侧栏入口）。
-    compileOnly files(project.findProperty('module_shop_api_jar'))
+    // 只对模块商店的公共 API 层编译：ModuleShopApi（经济 / 邮件）+ api.client（侧栏页面 + UI 套件）。
+    compileOnly files(shopApiJar)
     // 内容区页面 / 详情界面用 AtomLib（Skija）绘制，和模块商店内置页面同一套 UI 套件。
-    compileOnly files(project.findProperty('atomlib_jar'))
-    compileOnly files(project.findProperty('skija_jar'))
-    localRuntime files(project.findProperty('module_shop_jar'))
+    compileOnly files(atomlibJar)
+    compileOnly(skijaJar instanceof String ? files(skijaJar) : skijaJar)
+    localRuntime files(shopJar)
 }
 
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
