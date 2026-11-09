@@ -1,0 +1,68 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.144'
+}
+
+version = mod_version
+group = 'cn.autoforged.module_shop_redpacket'
+base { archivesName = "module_shop_redpacket" }
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+neoForge {
+    version = project.neo_version
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+    runs {
+        client { client() }
+        server { server(); programArgument '--nogui' }
+    }
+    mods {
+        "${mod_id}" { sourceSet sourceSets.main }
+    }
+}
+
+// ===================== 模块商店依赖 =====================
+// 本仓库独立于模块商店主仓库。附属只对模块商店的**公共 API jar**（含 UI 套件）编译，按优先级找：
+//   1. -Pmodule_shop_api_jar=<文件>（以及运行用的 -Pmodule_shop_jar=<文件>）
+//   2. -Pmodule_shop_root=<模块商店主仓库目录>：用它构建出来的 build/libs/module_shop-<版本>[-api].jar
+//   3. 默认：本仓库 libs/ 目录下的 module_shop-<版本>-api.jar / module_shop-<版本>.jar
+// <版本> 取 gradle.properties 的 module_shop_version。AtomLib 见 gradle/atomlib.gradle（自动下载 + SHA-256 校验）。
+def shopVersion = project.module_shop_version.toString()
+def pick = { String key, String fallback -> (project.findProperty(key) ?: fallback).toString() }
+def shopRootProp = project.findProperty('module_shop_root')
+def shopLibs = shopRootProp ? new File(file(shopRootProp.toString()), 'build/libs') : file('libs')
+def shopApiJar = pick('module_shop_api_jar', new File(shopLibs, "module_shop-${shopVersion}-api.jar").path)
+def shopJar = pick('module_shop_jar', new File(shopLibs, "module_shop-${shopVersion}.jar").path)
+
+tasks.named('compileJava').configure {
+    def apiJar = shopApiJar
+    doFirst {
+        if (!new File(apiJar).isFile()) {
+            throw new GradleException("找不到模块商店公共 API jar：${apiJar}\n" +
+                    "请把 module_shop-${shopVersion}-api.jar 放进 libs/，或用 -Pmodule_shop_root=<模块商店仓库目录> 指向已构建的主仓库。")
+        }
+    }
+}
+
+// 开发运行（runClient / runServer）时把模块商店 jar 一起加载；不会写进发布产物的依赖。
+configurations {
+    localRuntime
+    runtimeClasspath.extendsFrom localRuntime
+}
+
+// AtomLib（客户端 UI 前置）：与模块商店主仓库同一套脚本，compileOnly + 开发运行时加载。
+apply from: 'gradle/atomlib.gradle'
+
+dependencies {
+    // 只对模块商店的公共 API 层编译：ModuleShopApi（经济 / 邮件）+ api.client（侧栏页面 + UI 套件）。
+    compileOnly files(shopApiJar)
+    if (new File(shopJar).isFile()) {
+        localRuntime files(shopJar)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+tasks.withType(ProcessResources).configureEach { filteringCharset = 'UTF-8' }
