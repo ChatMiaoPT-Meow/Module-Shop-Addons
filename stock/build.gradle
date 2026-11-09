@@ -1,0 +1,60 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.144'
+}
+
+version = mod_version
+group = 'cn.autoforged.module_shop_stock'
+base { archivesName = "module_shop_stock" }
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+neoForge {
+    version = project.neo_version
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+    runs {
+        client { client() }
+        server { server(); programArgument '--nogui' }
+    }
+    mods {
+        "${mod_id}" { sourceSet sourceSets.main }
+    }
+}
+
+// 只编译公共 API jar；完整主体仅供本地运行，不打包进附属。
+def shopVersion = project.module_shop_version.toString()
+def pick = { String key, String fallback -> (project.findProperty(key) ?: fallback).toString() }
+def shopRootProp = project.findProperty('module_shop_root')
+def shopLibs = shopRootProp ? new File(file(shopRootProp.toString()), 'build/libs') : file('libs')
+def shopApiJar = pick('module_shop_api_jar', new File(shopLibs, "module_shop-${shopVersion}-api.jar").path)
+def shopJar = pick('module_shop_jar', new File(shopLibs, "module_shop-${shopVersion}.jar").path)
+
+tasks.named('compileJava').configure {
+    def apiJar = shopApiJar
+    doFirst {
+        if (!new File(apiJar).isFile()) {
+            throw new GradleException("找不到模组商店公共 API jar：${apiJar}\n" +
+                    "请先用 -Pmodule_shop_root=<模组商店仓库目录> 指向已构建的主仓库。")
+        }
+    }
+}
+
+configurations {
+    localRuntime
+    runtimeClasspath.extendsFrom localRuntime
+}
+
+apply from: 'gradle/atomlib.gradle'
+
+dependencies {
+    compileOnly files(shopApiJar)
+    if (new File(shopJar).isFile()) {
+        localRuntime files(shopJar)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+tasks.withType(ProcessResources).configureEach { filteringCharset = 'UTF-8' }
