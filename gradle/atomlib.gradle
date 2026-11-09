@@ -1,7 +1,7 @@
 // =====================================================================================
 // AtomLib（客户端 UI 前置库）接线
 //
-// 与 AtomChat 使用同一个已发布版本（0.1.0-beta / beta3），玩家两个 mod 可以共用同一个 AtomLib jar。
+// 编译版本见 gradle.properties 的 atomlib_version；运行期依赖范围是 atomlib_version_range（向上兼容）。
 // 版本与校验值固定在 gradle.properties：atomlib_version / atomlib_input_url / atomlib_input_sha256 / atomlib_jar_sha256。
 //
 // Maven 输入目录的来源（按优先级）：

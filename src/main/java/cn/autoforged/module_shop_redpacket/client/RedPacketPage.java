@@ -68,9 +68,8 @@ public final class RedPacketPage implements AddonPage {
         this.greetingField = field(host, RedPacketManager.MAX_GREETING, "gui.module_shop_redpacket.greeting_hint",
                 RedPacketState.greeting, v -> RedPacketState.greeting = v, false);
         this.send.onClick(this::submit);
-        if (RedPacketState.balance < 0L) {
-            RedPacketState.requestStatus();
-        }
+        // 每次进入页面都刷新货币名与限制（余额本身直接读主商店快照，见 render）。
+        RedPacketState.requestStatus();
     }
 
     private static SkiaTextField field(AddonPageHost host, int max, String hintKey, String value,
@@ -101,7 +100,11 @@ public final class RedPacketPage implements AddonPage {
 
     private void submit() {
         fields().forEach(SkiaTextField::blur);
-        RedPacketState.submit(this.host == null ? "" : this.host.currencyName());
+        if (this.host == null) {
+            RedPacketState.submit("");
+        } else {
+            RedPacketState.submit(this.host.currencyName(), this.host.balance());
+        }
     }
 
     // ------------------------------------------------------------------ 绘制
@@ -120,7 +123,8 @@ public final class RedPacketPage implements AddonPage {
         Draw.fill(canvas, x + w / 2.0F - 5.0F, y + HEADER_H - 6.0F, 10.0F, 10.0F, 5.0F, SEAL);
         Text.drawLine(canvas, Component.translatable("gui.module_shop_redpacket.send_title").getString(),
                 ShopTheme.bold(), Text.TITLE, 0xFFFFF4E0, x + 8.0F, y + 11.0F, 120.0F, Text.Align.LEFT);
-        long balance = RedPacketState.balance >= 0L ? RedPacketState.balance : f.host().balance();
+        // 余额以主商店为准：商店快照一更新这里就跟着变，不用等发红包后服务端回包。
+        long balance = f.host().balance();
         String balanceText = Component.translatable("gui.module_shop_redpacket.balance", balance, currency).getString();
         Text.drawLine(canvas, balanceText, ShopTheme.regular(), Text.SMALL, 0xFFFFE6C0,
                 x + w - 8.0F - 140.0F, y + 11.0F, 140.0F, Text.Align.RIGHT);

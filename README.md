@@ -6,9 +6,9 @@
 | --- | --- |
 | 显示名 | module-shop: Red envelope |
 | modid | `module_shop_redpacket`（NeoForge 的 modid 只能是小写字母、数字、下划线） |
-| 版本 | 1.0.0 |
+| 版本 | 1.0.1 |
 | 游戏 / 加载器 | Minecraft 1.21.1 · NeoForge 21.1.x |
-| 前置 | **模块商店 1.0.3+**（两端）· **AtomLib 0.1.0-beta**（仅客户端，模块商店本来就需要） |
+| 前置 | **模块商店 1.0.3+**（两端）· **AtomLib 0.1.0-beta 起**（已验证 0.4.0）（仅客户端，模块商店本来就需要） |
 | 许可 | MIT |
 | 主体仓库 | [ChatMiaoPT-Meow/Module-Shop](https://github.com/ChatMiaoPT-Meow/Module-Shop) |
 
@@ -19,8 +19,8 @@
 
 | 位置 | 放进 `mods/` 的文件 |
 | --- | --- |
-| 服务端 | `module_shop-1.0.3.jar` + `module_shop_redpacket-1.0.0.jar`（服务端**不需要** AtomLib） |
-| 客户端 | 上面两个 + `atomlib-1.21.1-neoforge-0.1.0-beta.jar` |
+| 服务端 | `module_shop-1.0.3.jar` + `module_shop_redpacket-1.0.1.jar`（服务端**不需要** AtomLib） |
+| 客户端 | 上面两个 + `atomlib-1.21.1-neoforge-0.4.0.jar`（0.1.0-beta 也可） |
 
 两端都要装红包附属（界面在客户端，红包逻辑在服务端）。
 
@@ -81,7 +81,7 @@
 | Minecraft | 1.21.1 | 指令（Brigadier）、存档（`SavedData`）、聊天组件与点击事件 | 运行环境 | — |
 | **模块商店公共 API** | 1.1.0（模块商店 1.0.3） | 动钱：`economy().take / add / balance / balanceView`；满额转邮件：`mail().sendMoneyMail`；侧栏页面：`api.client.ShopModules / AddonPage / ShopTheme` | `compileOnly module_shop-<版本>-api.jar`（只含公共 API 与 UI 套件） | MIT |
 | **模块商店 UI 套件** | 随模块商店 | `Draw / Text / SkiaFrame / Button / SkiaTextField / Motion / ScrollController`：和内置页面同一套控件 | 同上（打包在 API jar 里） | MIT |
-| **AtomLib** | 0.1.0-beta（beta3） | 客户端 Skija 渲染桥、字体（Noto Sans SC）与文字排版 | `compileOnly`，运行时由客户端安装的 AtomLib 提供 | Apache-2.0 |
+| **AtomLib** | 编译 0.4.0，运行期 0.1.0-beta 起 | 客户端 Skija 渲染桥、字体（Noto Sans SC）与文字排版 | `compileOnly`，运行时由客户端安装的 AtomLib 提供 | Apache-2.0 |
 | Skija | 0.143.18 | `Canvas` 绘制（运行时随 AtomLib 内置，只带 Windows 原生库） | 编译期作为 AtomLib 的传递依赖从 Maven Central 取 | Apache-2.0 |
 | ModDevGradle | 2.0.144 | 构建 | Gradle 插件 | LGPL-2.1 |
 | Parchment | 2024.11.17 | 参数名映射（只影响开发） | Gradle | CC0 |
@@ -108,13 +108,13 @@ src/main/resources/assets/module_shop_redpacket/lang/   zh_cn / en_us
 
 ## 构建
 
-本仓库可以单独构建，只需要模块商店的**公共 API jar**（`module_shop-1.0.3-api.jar`，含 UI 套件）。任选一种方式提供：
+本仓库可以单独构建，只需要模块商店的**公共 API jar**（`module_shop-1.0.6-api.jar`，含 UI 套件）。任选一种方式提供：
 
-1. 把 `module_shop-1.0.3-api.jar` 放进本仓库的 `libs/`（想用 `runClient` 一起加载主体，就把 `module_shop-1.0.3.jar` 也放进去）；
+1. 把 `module_shop-1.0.6-api.jar` 放进本仓库的 `libs/`（想用 `runClient` 一起加载主体，就把 `module_shop-1.0.6.jar` 也放进去）；
 2. 或者指向本地已构建的模块商店主仓库：`./gradlew build -Pmodule_shop_root=../Module-Shop`。
 
 ```bash
-./gradlew build          # 产物：build/libs/module_shop_redpacket-1.0.0.jar
+./gradlew build          # 产物：build/libs/module_shop_redpacket-1.0.1.jar
 ```
 
 - 编译所用的主体版本由 `gradle.properties` 的 `module_shop_version` 决定；也可以用 `-Pmodule_shop_api_jar=<文件>` 直接指定。

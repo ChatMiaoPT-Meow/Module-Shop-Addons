@@ -77,9 +77,8 @@ public class RedPacketSendScreen extends Screen {
                 .bounds(x + W - 14 - 76, y + H - 30, 76, 20).build());
         setLucky(RedPacketState.lucky);
         setInitialFocus(this.countBox);
-        if (RedPacketState.balance < 0L) {
-            RedPacketState.requestStatus();
-        }
+        // 每次打开都重新拉取余额；打开期间由 tick() 定时刷新。
+        RedPacketState.requestStatus();
     }
 
     private EditBox box(int x, int y, int w, int max, String value, String hintKey) {
@@ -111,6 +110,8 @@ public class RedPacketSendScreen extends Screen {
     public void tick() {
         super.tick();
         this.sendButton.active = !RedPacketState.waiting;
+        // 回退界面拿不到主商店的客户端快照，只能定时向服务端要最新余额（每 2 秒一次）。
+        RedPacketState.refreshStatus(2000L);
     }
 
     @Override

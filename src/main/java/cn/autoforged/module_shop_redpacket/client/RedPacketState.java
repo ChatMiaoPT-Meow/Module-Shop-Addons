@@ -33,7 +33,22 @@ public final class RedPacketState {
     private RedPacketState() {
     }
 
+    /** 上次发出 status 请求的时刻（毫秒），用于节流。 */
+    private static long lastStatusRequest;
+
+    /**
+     * 节流版的 {@link #requestStatus()}：距上次请求不足 {@code intervalMs} 就跳过。
+     * 余额归主商店的经济系统管，商店购买、出货箱、股市、领红包都会改它，
+     * 所以界面开着时要定期重新拉取，不能只在第一次打开时拿一次。
+     */
+    public static void refreshStatus(long intervalMs) {
+        if (System.currentTimeMillis() - lastStatusRequest >= intervalMs) {
+            requestStatus();
+        }
+    }
+
     public static void requestStatus() {
+        lastStatusRequest = System.currentTimeMillis();
         CompoundTag tag = new CompoundTag();
         tag.putString("type", "status");
         RedPacketNetwork.sendToServer(tag);
@@ -97,6 +112,14 @@ public final class RedPacketState {
 
     /** 本地预检 + 发送；返回是否已发出请求。 */
     public static boolean submit(String fallbackCurrency) {
+        return submit(fallbackCurrency, balance);
+    }
+
+    /**
+     * 同上，但用调用方给的余额做本地预检（商店内容页传主商店快照里的实时余额）。
+     * 余额 &lt; 0 表示未知：跳过本地预检，交给服务端判断。
+     */
+    public static boolean submit(String fallbackCurrency, long knownBalance) {
         if (waiting) {
             return false;
         }
@@ -115,8 +138,8 @@ public final class RedPacketState {
             showError(Component.translatable("msg.module_shop_redpacket.total_lt_count", cur));
             return false;
         }
-        if (balance >= 0L && t > balance) {
-            showError(Component.translatable("msg.module_shop_redpacket.insufficient", t, cur, balance));
+        if (knownBalance >= 0L && t > knownBalance) {
+            showError(Component.translatable("msg.module_shop_redpacket.insufficient", t, cur, knownBalance));
             return false;
         }
         CompoundTag tag = new CompoundTag();
