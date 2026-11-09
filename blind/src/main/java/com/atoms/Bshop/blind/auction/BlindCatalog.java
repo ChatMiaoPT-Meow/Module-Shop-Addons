@@ -21,6 +21,9 @@ public final class BlindCatalog {
     /** 第 1–4 轮的秒仓倍率：第一名 ≥ 第二名 × 倍率即直接成交；第 5 轮价高者得。 */
     public static final double[] BUYOUT = {2.0D, 1.6D, 1.4D, 1.2D, 0.0D};
 
+    /** 赌徒领先时秒仓倍率的减免。 */
+    public static final double GAMBLER_BUYOUT_CUT = 0.2D;
+
     /** 截至第 1–5 轮，系统对所有人公开揭示的藏品比例：轮廓。 */
     public static final double[] PUBLIC_OUTLINE = {0.30D, 0.45D, 0.60D, 0.75D, 0.90D};
     /** 截至第 1–5 轮，公开揭示品质的藏品比例（从已显示轮廓的藏品里挑）。 */
@@ -28,14 +31,23 @@ public final class BlindCatalog {
     /** 截至第 1–5 轮，公开揭示名称与价值的藏品件数。 */
     public static final int[] PUBLIC_VALUE = {0, 0, 1, 2, 3};
 
-    /** 某品质藏品的最低可能价值。 */
+    public static double buyout(int round) {
+        return BUYOUT[Math.max(0, Math.min(ROUNDS - 1, round - 1))];
+    }
+
+    /** 稀有及以上藏品的成色：残损价值 ×0.3，完美价值 ×2.5。 */
+    public static final double DUD_MULT = 0.3D;
+    public static final double GEM_MULT = 2.5D;
+    public static final int GRADE_TIER = 2;
+
+    /** 图鉴里某品质的最低基准价。 */
     public static long tierMin(int tier) {
         long m = Long.MAX_VALUE;
         for (Relic r : RELICS) if (r.tier() == tier) m = Math.min(m, r.min());
         return m == Long.MAX_VALUE ? 0L : m;
     }
 
-    /** 某品质藏品的平均价值（图鉴内各藏品区间中点的平均）。 */
+    /** 图鉴里某品质的平均基准价（各藏品区间中点的平均）。 */
     public static double tierMean(int tier) {
         double sum = 0;
         int n = 0;
@@ -48,30 +60,38 @@ public final class BlindCatalog {
         return n == 0 ? 0 : sum / n;
     }
 
+    /** 某区某品质藏品的最低可能价值（已计入价值倍率与残损）。 */
+    public static long tierMin(VaultZone zone, int tier) {
+        double m = tier >= GRADE_TIER && zone.dudChance > 0 ? DUD_MULT : 1.0D;
+        return (long) Math.floor(tierMin(tier) * zone.valueScale * m);
+    }
+
+    /** 某区某品质藏品的期望价值（已计入价值倍率与残损 / 完美概率）。 */
+    public static double tierMean(VaultZone zone, int tier) {
+        double e = tier >= GRADE_TIER ? 1 + zone.gemChance * (GEM_MULT - 1) - zone.dudChance * (1 - DUD_MULT) : 1;
+        return tierMean(tier) * zone.valueScale * e;
+    }
+
     /** 某区一件品质未知藏品的期望价值（按该区品质权重）。 */
     public static double unknownMean(VaultZone zone) {
         int[] w = tierWeights(zone);
         double sum = 0;
         int total = 0;
         for (int t = 0; t < w.length; t++) {
-            sum += w[t] * tierMean(t);
+            sum += w[t] * tierMean(zone, t);
             total += w[t];
         }
         return total == 0 ? 0 : sum / total;
     }
 
     /**
-     * 按已知程度推算一件藏品：lvl 3 用真实价值，lvl 2 用该品质最低价，lvl 0/1 用普通品质最低价。
+     * 按已知程度推算一件藏品：lvl 3 用真实价值，lvl 2 用该品质最低可能价，lvl 0/1 用普通品质最低价。
      * 结果保证不高于真实价值。
      */
-    public static long floorOf(int lvl, int tier, long value) {
+    public static long floorOf(VaultZone zone, int lvl, int tier, long value) {
         if (lvl >= 3) return value;
-        if (lvl == 2) return tierMin(tier);
-        return tierMin(0);
-    }
-
-    public static double buyout(int round) {
-        return BUYOUT[Math.max(0, Math.min(ROUNDS - 1, round - 1))];
+        if (lvl == 2) return tierMin(zone, tier);
+        return tierMin(zone, 0);
     }
 
     public record Relic(String name, String itemId, int tier, int w, int h, long min, long max) {}
@@ -118,13 +138,13 @@ public final class BlindCatalog {
 
     /** 鉴定师：开局选 1 位，技能按轮次自动生效，只有自己看得到。 */
     public enum Role {
-        HUNTER("寻宝猎人", "猎", "第 1 轮：直接看到全仓最贵的那 1 件藏品（位置、品质、价值）"),
-        ARCHAEOLOGIST("考古学家", "考", "第 1 轮显示某一品质全部藏品的轮廓；第 2–4 轮每轮再显示 2 件轮廓；第 5 轮显示全部轮廓"),
-        ENDER_EYE("末影之眼", "眼", "第 1 轮揭示 5 件藏品的品质；之后每轮再揭示 2–4 件"),
-        GOLD_EYE("金矿鉴定师", "金", "第 1 轮得知普通~稀有藏品的总价值；第 3 轮揭示史诗/传说/神话中随机一档的全部藏品"),
-        ARCHITECT("结构师", "构", "第 1–5 轮依次得知 优良/稀有/史诗/传说/神话 藏品各占多少格"),
-        STATISTICIAN("统计员", "统", "第 1 轮得知史诗及以上藏品的总件数，第 3 轮得知其中神话件数"),
-        GAMBLER("赌徒", "赌", "前 4 轮没有任何效果；第 5 轮揭示全仓所有藏品的品质");
+        HUNTER("寻宝猎人", "猎", "第 1 轮锁定全仓最贵藏品的位置与品质；第 3 轮得知它的名称与价值"),
+        ARCHAEOLOGIST("考古学家", "考", "第 1 轮显示全部藏品轮廓；第 2–5 轮每轮揭示 2 件占格最大的未知藏品品质"),
+        ENDER_EYE("末影之眼", "眼", "第 1 轮揭示 3 件藏品的品质；第 2–5 轮每轮再揭示 2 件"),
+        GOLD_EYE("金矿鉴定师", "金", "第 1 轮知普通~稀有总价值；第 2 轮知残损/完美件数；第 3 轮揭示史诗以上随机一档"),
+        ARCHITECT("结构师", "构", "第 1–5 轮依次得知 神话/传说/史诗/稀有/优良 藏品各占多少格"),
+        STATISTICIAN("统计员", "统", "第 1 轮知史诗以上件数；第 2 轮知神话件数；第 4 轮知各品质件数"),
+        GAMBLER("赌徒", "赌", "第 3 轮随机揭示 2 件品质，第 5 轮揭示全部品质；你报价第一时秒仓倍率 −0.2");
 
         public final String title;
         public final String glyph;
@@ -145,10 +165,9 @@ public final class BlindCatalog {
     /** 局内道具：每种每局 1 次，每轮最多用 1 个，提交报价后本轮不能再用。 */
     public enum Tool {
         HAMMER("鉴定锤", "锤", true, "点一个格子：揭示该处藏品的轮廓与品质（空格会被标出）"),
-        LENS("放大镜", "镜", true, "点一个格子：揭示该处藏品的名称与价值"),
-        SCANNER("扫描仪", "扫", false, "随机显示 3 件未知藏品的轮廓"),
-        GLOWSTICK("荧光棒", "荧", false, "得知每种品质各有几件藏品"),
-        TABLET("估价平板", "估", false, "得知全仓总价值的大致区间（±15%）");
+        LENS("放大镜", "镜", true, "点一个格子：揭示该处藏品的名称、成色与价值"),
+        SCANNER("扫描仪", "扫", false, "随机揭示 2 件未知品质藏品的品质"),
+        GLOWSTICK("荧光棒", "荧", false, "得知每种品质各有几件藏品");
 
         public final String title;
         public final String glyph;

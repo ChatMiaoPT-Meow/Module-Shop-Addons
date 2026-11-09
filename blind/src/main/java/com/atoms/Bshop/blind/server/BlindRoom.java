@@ -14,7 +14,12 @@ final class BlindRoom {
     enum Phase { BIDDING, RESULT }
 
     /** 摆进仓库的一件藏品。 */
-    record Placed(int id, Relic relic, int x, int y, long value) {
+    /** grade：0 正常 / 1 残损 / 2 完美（只有稀有及以上会出现）。 */
+    record Placed(int id, Relic relic, int x, int y, long value, int grade) {
+        String displayName() {
+            return grade == 1 ? "残损·" + relic.name() : grade == 2 ? "完美·" + relic.name() : relic.name();
+        }
+
         boolean covers(int cell) {
             int cx = cell % BlindCatalog.COLS;
             int cy = cell / BlindCatalog.COLS;
@@ -109,7 +114,7 @@ final class BlindRoom {
         long sum = 0L;
         for (Placed p : items) {
             int lvl = p.id() < know.length ? know[p.id()] : 0;
-            sum += BlindCatalog.floorOf(lvl, p.relic().tier(), p.value());
+            sum += BlindCatalog.floorOf(zone, lvl, p.relic().tier(), p.value());
         }
         return sum;
     }
@@ -120,7 +125,7 @@ final class BlindRoom {
         double sum = 0;
         for (Placed p : items) {
             int lvl = p.id() < know.length ? know[p.id()] : 0;
-            sum += lvl >= 3 ? p.value() : lvl == 2 ? BlindCatalog.tierMean(p.relic().tier()) : unknown;
+            sum += lvl >= 3 ? p.value() : lvl == 2 ? BlindCatalog.tierMean(zone, p.relic().tier()) : unknown;
         }
         return sum;
     }

@@ -15,7 +15,7 @@ import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 /** 附属自有网络协议。客户端只发动作，服务端按玩家下发各自的快照（每人只看到自己的情报）。 */
 public final class BlindAuctionNetwork {
-    private static final String PROTOCOL = "6";
+    private static final String PROTOCOL = "7";
 
     public static final int SET_ZONE = 0;
     public static final int SET_ROLE = 1;

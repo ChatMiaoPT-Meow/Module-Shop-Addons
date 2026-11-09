@@ -7,7 +7,7 @@
 | --- | --- | --- | --- | --- |
 | [`redpacket/`](redpacket/) | module-shop: Red envelope | `module_shop_redpacket` | 1.0.1 | 拼手气 / 均分红包，聊天栏领取、口令红包 |
 | [`stock/`](stock/) | module-shop: Stock market | `module_shop_stock` | 2.2.0 | 虚拟股市：订单簿、限价 / 市价、做空、K 线与新闻 |
-| [`blind/`](blind/) | Module Shop Blind Vault | `module_shop_blind` | 3.3.0 | 遗迹盲仓暗标竞拍：多房间匹配、鉴定师与道具、AI 补位 |
+| [`blind/`](blind/) | Module Shop Blind Vault | `module_shop_blind` | 3.4.0 | 遗迹盲仓暗标竞拍：多房间匹配、鉴定师与道具、AI 补位 |
 
 ## 前置与兼容
 

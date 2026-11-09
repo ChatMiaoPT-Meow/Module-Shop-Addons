@@ -132,7 +132,7 @@ public class BlindVaultRouterView {
             g.text(zone.title, zx + 21, zy + 8, zw - 24, Align.LEFT, SMALL, true, sel ? BlindTheme.accent() : BlindTheme.text());
             g.text(locked ? "需持有 ≥ " + fmt(Math.max(zone.minStarCoinReq, zone.entryFee)) + " ★" : "门票 " + fmt(zone.entryFee) + " ★",
                     zx + 21, zy + 18, zw - 24, Align.LEFT, SMALL, false, locked ? BlindTheme.red() : BlindTheme.text3());
-            if (hit(zx, zy, zw, 26)) hoverTip = zone.subTitle + " · 价值" + zone.rating;
+            if (hit(zx, zy, zw, 26)) hoverTip = zone.subTitle + " · 风险" + zone.rating + " · 需持有 ≥ " + fmt(zone.minStarCoinReq) + " ★";
             int id = zone.id;
             click(zx, zy, zw, 26, () -> BlindAuctionNetwork.sendAction(BlindAuctionNetwork.SET_ZONE, id, 0, 0));
         }

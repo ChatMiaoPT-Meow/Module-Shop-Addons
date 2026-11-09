@@ -191,7 +191,7 @@ public final class BlindVaultEngine {
         int ai = 0;
         while (room.seats.size() < zone.seatCount) {
             Seat s = new Seat(null, names.get(ai++ % names.size()) + "·AI", 0, 0L);
-            s.aiBias = 0.85D + RANDOM.nextDouble() * 0.30D;
+            s.aiBias = zone.aiBiasLow + RANDOM.nextDouble() * (zone.aiBiasHigh - zone.aiBiasLow);
             s.aiStyle = 0.88D + RANDOM.nextDouble() * 0.20D;
             room.seats.add(s);
         }
@@ -239,8 +239,21 @@ public final class BlindVaultEngine {
             for (int dx = 0; dx < relic.w(); dx++) {
                 for (int dy = 0; dy < relic.h(); dy++) used[(y + dy) * BlindCatalog.COLS + x + dx] = true;
             }
-            long value = Math.round((relic.min() + (long) (RANDOM.nextDouble() * (relic.max() - relic.min()))) / 10.0D) * 10L;
-            out.add(new Placed(out.size(), relic, x, y, value));
+            int grade = 0;
+            double mult = 1.0D;
+            if (relic.tier() >= BlindCatalog.GRADE_TIER) {
+                double g = RANDOM.nextDouble();
+                if (g < zone.dudChance) {
+                    grade = 1;
+                    mult = BlindCatalog.DUD_MULT;
+                } else if (g < zone.dudChance + zone.gemChance) {
+                    grade = 2;
+                    mult = BlindCatalog.GEM_MULT;
+                }
+            }
+            double base = relic.min() + RANDOM.nextDouble() * (relic.max() - relic.min());
+            long value = Math.max(BlindCatalog.tierMin(zone, relic.tier()), Math.round(base * zone.valueScale * mult / 10.0D) * 10L);
+            out.add(new Placed(out.size(), relic, x, y, value, grade));
             filled += relic.w() * relic.h();
         }
         return out;
@@ -328,42 +341,42 @@ public final class BlindVaultEngine {
         List<Placed> items = room.items;
         switch (role) {
             case HUNTER -> {
-                if (r == 1 && !items.isEmpty()) {
-                    Placed best = Collections.max(items, Comparator.comparingLong(Placed::value));
+                if (items.isEmpty()) break;
+                Placed best = Collections.max(items, Comparator.comparingLong(Placed::value));
+                if (r == 1) {
+                    s.learn(best.id(), 2);
+                    s.log(r, 1, badge, "全仓最贵的是一件「" + BlindCatalog.TIER_NAMES[best.relic().tier()] + "」藏品，占 "
+                            + best.cells() + " 格，已标出位置");
+                } else if (r == 3) {
                     s.learn(best.id(), 3);
-                    s.log(r, 1, badge, "全仓最贵：" + best.relic().name() + "（" + BlindCatalog.TIER_NAMES[best.relic().tier()]
-                            + "）" + fmt(best.value()) + " ★");
+                    s.log(r, 1, badge, "全仓最贵：" + best.displayName() + " " + fmt(best.value()) + " ★");
                 }
             }
             case ARCHAEOLOGIST -> {
                 if (r == 1) {
-                    List<Integer> tiers = items.stream().map(p -> p.relic().tier()).distinct().toList();
-                    if (!tiers.isEmpty()) {
-                        int tier = tiers.get(RANDOM.nextInt(tiers.size()));
-                        int n = 0;
-                        for (Placed p : items) {
-                            if (p.relic().tier() == tier) {
-                                s.learn(p.id(), 1);
-                                n++;
-                            }
-                        }
-                        s.log(r, 1, badge, "显示了同一品质的 " + n + " 件藏品轮廓");
-                    }
-                } else if (r < 5) {
-                    s.log(r, 1, badge, "再显示 " + learnRandom(s, items, 0, 1, 2) + " 件藏品轮廓");
-                } else {
                     for (Placed p : items) s.learn(p.id(), 1);
-                    s.log(r, 1, badge, "全仓藏品轮廓已全部显示");
+                    s.log(r, 1, badge, "全仓 " + items.size() + " 件藏品轮廓已全部显示");
+                } else {
+                    List<Placed> cand = new ArrayList<>(items.stream().filter(p -> s.know[p.id()] < 2).toList());
+                    Collections.shuffle(cand, RANDOM);
+                    cand.sort(Comparator.comparingInt(Placed::cells).reversed());
+                    int n = Math.min(2, cand.size());
+                    for (int i = 0; i < n; i++) s.learn(cand.get(i).id(), 2);
+                    s.log(r, 1, badge, "揭示了 " + n + " 件大件藏品的品质");
                 }
             }
             case ENDER_EYE -> {
-                int n = learnRandom(s, items, 1, 2, r == 1 ? 5 : 2 + RANDOM.nextInt(3));
+                int n = learnRandom(s, items, 1, 2, r == 1 ? 3 : 2);
                 s.log(r, 1, badge, "揭示了 " + n + " 件藏品的品质");
             }
             case GOLD_EYE -> {
                 if (r == 1) {
                     long low = items.stream().filter(p -> p.relic().tier() <= 2).mapToLong(Placed::value).sum();
                     s.log(r, 1, badge, "普通~稀有藏品合计价值 " + fmt(low) + " ★");
+                } else if (r == 2) {
+                    long duds = items.stream().filter(p -> p.grade() == 1).count();
+                    long gems = items.stream().filter(p -> p.grade() == 2).count();
+                    s.log(r, 1, badge, "仓内残损藏品 " + duds + " 件，完美藏品 " + gems + " 件");
                 } else if (r == 3) {
                     List<Integer> high = items.stream().map(p -> p.relic().tier()).filter(t -> t >= 3).distinct().toList();
                     if (high.isEmpty()) {
@@ -382,24 +395,41 @@ public final class BlindVaultEngine {
                 }
             }
             case ARCHITECT -> {
-                int tier = r; // 1..5 → 优良…神话
+                int tier = 6 - r; // 第 1..5 轮 → 神话…优良
                 int cells = items.stream().filter(p -> p.relic().tier() == tier).mapToInt(Placed::cells).sum();
                 s.log(r, 1, badge, "「" + BlindCatalog.TIER_NAMES[tier] + "」藏品共占 " + cells + " 格");
             }
             case STATISTICIAN -> {
                 if (r == 1) {
                     s.log(r, 1, badge, "史诗及以上藏品共 " + items.stream().filter(p -> p.relic().tier() >= 3).count() + " 件");
-                } else if (r == 3) {
+                } else if (r == 2) {
                     s.log(r, 1, badge, "其中神话藏品 " + items.stream().filter(p -> p.relic().tier() == 5).count() + " 件");
+                } else if (r == 4) {
+                    s.log(r, 1, badge, tierCounts(items));
                 }
             }
             case GAMBLER -> {
-                if (r == 5) {
+                if (r == 1) {
+                    s.log(r, 1, badge, "你报价第一时，秒仓倍率降低 " + BlindCatalog.GAMBLER_BUYOUT_CUT);
+                } else if (r == 3) {
+                    s.log(r, 1, badge, "随机揭示了 " + learnRandom(s, items, 1, 2, 2) + " 件藏品的品质");
+                } else if (r == 5) {
                     for (Placed p : items) s.learn(p.id(), 2);
                     s.log(r, 1, badge, "全仓藏品品质已全部揭示");
                 }
             }
         }
+    }
+
+    private static String tierCounts(List<Placed> items) {
+        StringBuilder sb = new StringBuilder();
+        for (int t = 0; t < BlindCatalog.TIER_NAMES.length; t++) {
+            int tt = t;
+            long n = items.stream().filter(x -> x.relic().tier() == tt).count();
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(BlindCatalog.TIER_NAMES[t]).append(n);
+        }
+        return sb.toString();
     }
 
     /** 从「已知程度 ≤ below」的藏品里随机挑 count 件提升到 level，返回实际数量。 */
@@ -451,28 +481,13 @@ public final class BlindVaultEngine {
                         s.log(r, 2, badge, "这是一件「" + BlindCatalog.TIER_NAMES[it.relic().tier()] + "」藏品，占 " + it.cells() + " 格");
                     } else {
                         s.learn(owner, 3);
-                        s.log(r, 2, badge, it.relic().name() + "（" + BlindCatalog.TIER_NAMES[it.relic().tier()] + "）价值 "
+                        s.log(r, 2, badge, it.displayName() + "（" + BlindCatalog.TIER_NAMES[it.relic().tier()] + "）价值 "
                                 + fmt(it.value()) + " ★");
                     }
                 }
             }
-            case SCANNER -> s.log(r, 2, badge, "显示了 " + learnRandom(s, items, 0, 1, 3) + " 件藏品轮廓");
-            case GLOWSTICK -> {
-                StringBuilder sb = new StringBuilder();
-                for (int t = 0; t < BlindCatalog.TIER_NAMES.length; t++) {
-                    int tt = t;
-                    long n = items.stream().filter(x -> x.relic().tier() == tt).count();
-                    if (sb.length() > 0) sb.append(' ');
-                    sb.append(BlindCatalog.TIER_NAMES[t]).append(n);
-                }
-                s.log(r, 2, badge, sb.toString());
-            }
-            case TABLET -> {
-                double center = room.trueValue() * (0.92D + RANDOM.nextDouble() * 0.16D);
-                long low = Math.round(center * 0.85D / 100.0D) * 100L;
-                long high = Math.round(center * 1.15D / 100.0D) * 100L;
-                s.log(r, 2, badge, "全仓总价值约 " + fmt(low) + " ~ " + fmt(high) + " ★");
-            }
+            case SCANNER -> s.log(r, 2, badge, "揭示了 " + learnRandom(s, items, 1, 2, 2) + " 件藏品的品质");
+            case GLOWSTICK -> s.log(r, 2, badge, tierCounts(items));
         }
         s.toolUsed[tool.ordinal()] = true;
         s.toolThisRound = true;
@@ -534,6 +549,7 @@ public final class BlindVaultEngine {
             return;
         }
         double mult = BlindCatalog.buyout(r);
+        if (top.human() && Role.byId(top.role) == Role.GAMBLER) mult -= BlindCatalog.GAMBLER_BUYOUT_CUT;
         boolean instant = top.bid > 0 && (second > 0 ? top.bid >= Math.ceil(second * mult) : top.bid >= room.floor);
         if (instant) {
             finish(server, room, top, true);
@@ -585,7 +601,7 @@ public final class BlindVaultEngine {
         res.putBoolean("instant", instant);
         res.putBoolean("defaulted", defaulted);
         res.putInt("rounds", room.round);
-        res.putString("topItem", top == null ? "" : top.relic().name());
+        res.putString("topItem", top == null ? "" : top.displayName());
         res.putLong("topValue", top == null ? 0L : top.value());
         res.putLong("at", System.currentTimeMillis());
         ListTag seats = new ListTag();
@@ -784,7 +800,7 @@ public final class BlindVaultEngine {
             t.putInt("lvl", lvl);
             if (lvl >= 2) t.putInt("tier", it.relic().tier());
             if (lvl >= 3) {
-                t.putString("name", it.relic().name());
+                t.putString("name", it.displayName());
                 t.putString("item", it.relic().itemId());
                 t.putLong("value", it.value());
             }
