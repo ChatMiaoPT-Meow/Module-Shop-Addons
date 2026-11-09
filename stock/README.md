@@ -7,7 +7,7 @@
 | modid | `module_shop_stock` |
 | 版本 | 2.2.0 |
 | 前置 | 模块商店 1.0.3+（两端）· AtomLib 0.1.0-beta 起（仅客户端，已验证 0.4.0） |
-| 许可 | MIT（见 `neoforge.mods.toml`） |
+| 许可 | MIT |
 
 ## 功能
 

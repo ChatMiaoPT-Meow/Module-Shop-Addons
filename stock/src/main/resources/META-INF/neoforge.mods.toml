@@ -6,7 +6,7 @@ license="MIT"
 modId="module_shop_stock"
 version="2.2.0"
 displayName="module-shop: Stock market"
-authors="Ar_Zhe"
+authors="ChatMiaoPT-Meow"
 description='''
 模组商店附属：虚拟股市。
 股票定义存在存档里，管理员可以在商店界面里直接发行新股、改名、调参、停牌、下架与强制清算；

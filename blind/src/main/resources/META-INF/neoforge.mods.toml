@@ -1,12 +1,12 @@
 modLoader="javafml"
 loaderVersion="[1,)"
-license="All Rights Reserved"
+license="MIT"
 
 [[mods]]
 modId="module_shop_blind"
 version="3.3.0"
 displayName="Module Shop Blind Vault"
-authors="Atoms"
+authors="ChatMiaoPT-Meow"
 description='''
 模组商店附属：遗迹盲仓暗标竞拍（星币回收）。
 6x6 盲仓、5 轮技能暗标、多人匹配不足补模拟 AI；资金全部通过模组商店公共 EconomyApi 结算。

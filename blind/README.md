@@ -7,8 +7,7 @@
 | modid | `module_shop_blind` |
 | 版本 | 3.3.0（网络协议 "6"） |
 | 前置 | 模块商店 1.0.3+（两端）· AtomLib 0.1.0-beta 起（仅客户端，已验证 0.4.0） |
-| 来源 | 原作者 Atoms 的 Forge 1.20.1 版本，移植到 NeoForge 1.21.1 并重做玩法 |
-| 许可 | 见 `neoforge.mods.toml`（原作 All Rights Reserved） |
+| 许可 | MIT |
 
 ## 玩法
 

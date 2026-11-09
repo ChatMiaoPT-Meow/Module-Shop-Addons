@@ -38,4 +38,4 @@ cd ../redpacket && ./gradlew build -Pmodule_shop_root=../../Module-Shop
 
 ## 许可
 
-各模组的许可见对应目录（`neoforge.mods.toml` 的 `license` 字段与目录内 LICENSE）。
+全部附属均为 MIT 许可，作者 ChatMiaoPT-Meow（见 [LICENSE](LICENSE)）。
