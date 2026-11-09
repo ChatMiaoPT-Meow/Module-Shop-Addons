@@ -6,7 +6,7 @@ license="MIT"
 modId="module_shop_redpacket"
 version="1.0.0"
 displayName="module-shop: Red envelope"
-authors="Ar_Zhe"
+authors="ChatMiaoPT-Meow"
 description='''
 模块商店（Module Shop）附属：红包。
 在商店左侧功能区发红包（拼手气 / 均分，可设口令与祝福语），红包会出现在聊天栏，点击即可领取；

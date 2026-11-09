@@ -1,5 +1,7 @@
 # module-shop: Red envelope · 拼手气红包
 
+
+> **以后在 [ChatMiaoPT-Meow/Module-Shop-Addons](https://github.com/ChatMiaoPT-Meow/Module-Shop-Addons) 的 `redpacket/` 目录维护**（与股市、暗拍附属放在一起）。本仓库保留到 1.0.1，之后不再单独更新。
 **模块商店（Module Shop）的附属模组**：在商店里发拼手气 / 均分红包，红包出现在聊天栏，点击或发口令领取。
 
 | 项 | 值 |
