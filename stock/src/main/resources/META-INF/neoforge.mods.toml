@@ -4,7 +4,7 @@ license="MIT"
 
 [[mods]]
 modId="module_shop_stock"
-version="2.2.0"
+version="2.4.0"
 displayName="module-shop: Stock market"
 authors="ChatMiaoPT-Meow"
 description='''
@@ -31,7 +31,7 @@ description='''
 [[dependencies.module_shop_stock]]
     modId="module_shop"
     type="required"
-    versionRange="[1.0.3,)"
+    versionRange="[1.1.0,)"
     ordering="AFTER"
     side="BOTH"
 

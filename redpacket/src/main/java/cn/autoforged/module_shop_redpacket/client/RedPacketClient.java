@@ -35,6 +35,7 @@ public final class RedPacketClient {
                 }
             }
             case "detail" -> {
+                RedPacketState.lastDetail = tag;
                 if (mc.screen instanceof RedPacketDetailAtomScreen screen) {
                     screen.replace(tag);
                 } else if (mc.screen instanceof RedPacketDetailScreen screen) {

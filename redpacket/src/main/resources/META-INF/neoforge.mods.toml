@@ -4,7 +4,7 @@ license="MIT"
 
 [[mods]]
 modId="module_shop_redpacket"
-version="1.0.0"
+version="1.1.0"
 displayName="module-shop: Red envelope"
 authors="ChatMiaoPT-Meow"
 description='''
@@ -30,7 +30,7 @@ description='''
 [[dependencies.module_shop_redpacket]]
     modId="module_shop"
     type="required"
-    versionRange="[1.0.3,)"
+    versionRange="[1.1.0,)"
     ordering="AFTER"
     side="BOTH"
 

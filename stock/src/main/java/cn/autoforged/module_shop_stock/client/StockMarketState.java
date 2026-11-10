@@ -106,6 +106,7 @@ public final class StockMarketState {
         public long filled;
         public String state = "OPEN";
         public long expireAt;
+        public long createdAt;
     }
 
     public static final class BoardRow {
@@ -751,6 +752,7 @@ public final class StockMarketState {
             order.filled = entry.getLong("filled");
             order.state = entry.getString("state");
             order.expireAt = entry.getLong("expireAt");
+            order.createdAt = entry.getLong("createdAt");
             ORDERS.add(order);
         }
 
@@ -984,6 +986,19 @@ public final class StockMarketState {
         messageError = error;
         messageArgs = args;
         messageAt = System.currentTimeMillis();
+    }
+
+    /** 与服务端 StockMarketConfig.fee 同一算法：按 feeBps 向上取整，不低于 minFee，且不超过成交额 - 1。 */
+    public static long fee(long total) {
+        if (feeBps <= 0 || total <= 0L) {
+            return 0L;
+        }
+        long raw = (total / 10_000L) * feeBps + ((total % 10_000L) * feeBps + 9_999L) / 10_000L;
+        return Math.min(Math.max(minFee, raw), Math.max(0L, total - 1L));
+    }
+
+    public static long multiply(long a, long b) {
+        return saturatedMultiply(a, b);
     }
 
     public static String number(long value) {

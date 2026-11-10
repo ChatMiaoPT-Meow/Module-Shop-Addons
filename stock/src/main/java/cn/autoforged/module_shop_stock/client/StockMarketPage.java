@@ -6,25 +6,26 @@ import cn.autoforged.module_shop.api.client.AddonPageHost;
 import cn.autoforged.module_shop.api.client.ShopTheme;
 import cn.autoforged.module_shop.client.ui.render.Draw;
 import cn.autoforged.module_shop.client.ui.render.Text;
+import cn.autoforged.module_shop.client.ui.v2.V2;
 import cn.autoforged.module_shop_stock.client.view.AdminView;
-import cn.autoforged.module_shop_stock.client.view.BoardView;
-import cn.autoforged.module_shop_stock.client.view.OrderView;
-import cn.autoforged.module_shop_stock.client.view.PositionView;
+import cn.autoforged.module_shop_stock.client.view.NewsBoardView;
+import cn.autoforged.module_shop_stock.client.view.PortfolioView;
 import cn.autoforged.module_shop_stock.client.view.QuoteView;
 import cn.autoforged.module_shop_stock.client.view.StockView;
 import io.github.humbleui.skija.Canvas;
+import java.util.List;
 import java.util.Locale;
 import net.minecraft.network.chat.Component;
 
 /**
- * 商店内容区的股市页：底部切页 + 实时市场新闻播报栏，页内视图各自绘制。
+ * 商店内容区的股市页（UI v2）：顶部工具条（标题 + 分段页签 + 当前页的搜索 / 筛选）、中间主体、
+ * 底栏（左：计数说明；右：交易结果 / 市场新闻滚动播报 / 操作提示）。
  */
 public final class StockMarketPage implements AddonPage {
     private enum Tab {
-        QUOTE("gui.stock.tab.quote"),
-        POSITION("gui.stock.tab.position"),
-        ORDER("gui.stock.tab.order"),
-        BOARD("gui.stock.tab.board"),
+        QUOTE("gui.stock.v2.tab.quote"),
+        PORTFOLIO("gui.stock.v2.tab.portfolio"),
+        NEWS("gui.stock.v2.tab.news"),
         ADMIN("gui.stock.tab.admin");
 
         final String key;
@@ -34,22 +35,23 @@ public final class StockMarketPage implements AddonPage {
         }
     }
 
-    private static final float PAD = 4.0F;
-    private static final float TAB_W = 30.0F;
-    private static final float TAB_GAP = 2.0F;
-    private static final float TAB_H = 14.0F;
-
     private final StockView[] views = new StockView[Tab.values().length];
     private Tab tab = Tab.QUOTE;
     private long nextHeartbeat;
+    private float[][] segRects = new float[0][2];
+    private float segY;
+    private final float[] tickerRect = new float[4];
+    private boolean tickerShown;
 
     public StockMarketPage() {
-        QuoteView quote = new QuoteView();
-        this.views[Tab.QUOTE.ordinal()] = quote;
-        this.views[Tab.POSITION.ordinal()] = new PositionView(() -> this.tab = Tab.QUOTE);
-        this.views[Tab.ORDER.ordinal()] = new OrderView();
-        this.views[Tab.BOARD.ordinal()] = new BoardView();
+        this.views[Tab.QUOTE.ordinal()] = new QuoteView();
+        this.views[Tab.PORTFOLIO.ordinal()] = new PortfolioView(this::openQuote);
+        this.views[Tab.NEWS.ordinal()] = new NewsBoardView(this::openQuote);
         this.views[Tab.ADMIN.ordinal()] = new AdminView();
+    }
+
+    private void openQuote() {
+        this.tab = Tab.QUOTE;
     }
 
     @Override
@@ -64,6 +66,23 @@ public final class StockMarketPage implements AddonPage {
         }
     }
 
+    private int tabCount() {
+        return StockMarketState.admin ? 4 : 3;
+    }
+
+    private void switchTo(Tab next) {
+        if (next == this.tab) {
+            return;
+        }
+        this.views[this.tab.ordinal()].cancelInput();
+        this.tab = next;
+    }
+
+    private static AddonFrame body(AddonFrame f) {
+        return new AddonFrame(f.host(), f.x(), f.y() + V2.BAR, f.w(), f.h() - V2.BAR - V2.FOOT,
+                f.mouseX(), f.mouseY(), f.dtMs());
+    }
+
     @Override
     public void render(Canvas canvas, AddonFrame f) {
         long now = System.currentTimeMillis();
@@ -74,76 +93,76 @@ public final class StockMarketPage implements AddonPage {
         if (this.tab == Tab.ADMIN && !StockMarketState.admin) {
             this.tab = Tab.QUOTE;
         }
-        this.views[this.tab.ordinal()].render(canvas, f);
-        renderFooter(canvas, f);
-    }
+        StockView view = this.views[this.tab.ordinal()];
 
-    private int tabCount() {
-        return StockMarketState.admin ? 5 : 4;
-    }
-
-    private float tabX(int index, AddonFrame f) {
-        return f.x() + PAD + index * (TAB_W + TAB_GAP);
-    }
-
-    private void renderFooter(Canvas canvas, AddonFrame f) {
-        float x = f.x() + PAD;
-        float width = f.w() - PAD * 2.0F;
-        float top = f.barTop();
-        Draw.hairline(canvas, x, top - 1.0F, width, ShopTheme.borderDim());
-
-        int count = tabCount();
-        float tabY = top + 2.0F;
-        for (int i = 0; i < count; i++) {
-            Tab value = Tab.values()[i];
-            boolean selected = this.tab == value;
-            float bx = tabX(i, f);
-            boolean hover = f.mouseX() >= bx && f.mouseX() < bx + TAB_W
-                    && f.mouseY() >= tabY && f.mouseY() < tabY + TAB_H;
-            if (selected) {
-                Draw.fill(canvas, bx, tabY, TAB_W, TAB_H, 2.0F, ShopTheme.accentTint());
-            } else if (hover) {
-                Draw.fill(canvas, bx, tabY, TAB_W, TAB_H, 2.0F, ShopTheme.rowHover());
-            }
-            Text.drawLine(canvas, Component.translatable(value.key).getString(),
-                    selected ? ShopTheme.bold() : ShopTheme.regular(), Text.SMALL,
-                    selected ? ShopTheme.accent() : ShopTheme.text2(),
-                    bx, tabY + TAB_H / 2.0F, TAB_W, Text.Align.CENTER);
+        // 工具条：标题 + 页签 + 视图自己的那一段
+        float cy = f.y() + V2.BAR / 2.0F;
+        Draw.hairline(canvas, f.x(), f.y() + V2.BAR - 0.5F, f.w(), ShopTheme.borderDim());
+        float titleW = V2.bold(canvas, Component.translatable("gui.stock.v2.title").getString(), V2.FS_T,
+                ShopTheme.text(), f.x() + 8.0F, cy, 80.0F, Text.Align.LEFT);
+        String[] labels = new String[tabCount()];
+        for (int i = 0; i < labels.length; i++) {
+            labels[i] = Component.translatable(Tab.values()[i].key).getString();
         }
+        float sx = f.x() + 8.0F + titleW + 10.0F;
+        this.segY = cy - V2.CTRL / 2.0F;
+        this.segRects = V2.segmented(canvas, labels, this.tab.ordinal(), sx, this.segY, null);
+        float[] last = this.segRects[this.segRects.length - 1];
+        float tx = last[0] + last[1] + 10.0F;
+        view.toolbar(canvas, f, tx, f.y(), Math.max(0.0F, f.x() + f.w() - 8.0F - tx));
 
-        float messageX = tabX(count, f) + 2.0F;
-        float messageW = Math.max(0.0F, x + width - messageX);
-        String message = StockMarketState.message().getString();
-        boolean stale = System.currentTimeMillis() - StockMarketState.messageAt() > 12_000L;
-        if (!message.isEmpty() && !stale) {
-            int color = StockMarketState.messageError() ? ShopTheme.red() : ShopTheme.green();
-            Text.drawLine(canvas, message, ShopTheme.regular(), Text.SMALL, color, messageX,
-                    tabY + TAB_H / 2.0F, messageW, Text.Align.LEFT);
-        } else if (!StockMarketState.tickerNews().isEmpty()) {
-            drawTicker(canvas, StockMarketState.tickerNews(), messageX, tabY, messageW);
-        } else {
-            Text.drawLine(canvas, hint(), ShopTheme.regular(), Text.SMALL, ShopTheme.text3(), messageX,
-                    tabY + TAB_H / 2.0F, messageW, Text.Align.LEFT);
-        }
+        view.render(canvas, body(f));
+        renderFoot(canvas, f, view);
     }
 
-    /** 底栏新闻滚动播报：所有近期快讯首尾相接从右往左循环滚动，利好红、利空绿。 */
-    private static void drawTicker(Canvas canvas, java.util.List<StockMarketState.News> news,
-            float x, float tabY, float w) {
-        if (w <= 8.0F) {
+    // ------------------------------------------------------------------ 底栏
+
+    private void renderFoot(Canvas canvas, AddonFrame f, StockView view) {
+        float y = f.y() + f.h() - V2.FOOT;
+        String left = view.footLeft();
+        V2.foot(canvas, f.x(), y, f.w(), left, null);
+        float lw = left == null ? 0.0F : Math.min(f.w() * 0.5F, V2.width(left, V2.FS_S, false)) + 16.0F;
+        float rx = f.x() + lw;
+        float rw = f.w() - lw - 8.0F;
+        float cy = y + V2.FOOT / 2.0F;
+        this.tickerShown = false;
+        if (rw <= 8.0F) {
             return;
         }
+        String message = StockMarketState.message().getString();
+        boolean fresh = System.currentTimeMillis() - StockMarketState.messageAt() <= 12_000L;
+        if (!message.isEmpty() && fresh) {
+            int color = StockMarketState.messageError() ? ShopTheme.red() : ShopTheme.green();
+            V2.text(canvas, message, V2.FS_S, color, rx, cy, rw, Text.Align.RIGHT);
+        } else if (!StockMarketState.enabled || !StockMarketState.session) {
+            V2.text(canvas, Component.translatable(StockMarketState.enabled ? "gui.stock.hint_session"
+                    : "gui.stock.hint_closed").getString(), V2.FS_S, ShopTheme.gold(), rx, cy, rw, Text.Align.RIGHT);
+        } else if (!StockMarketState.tickerNews().isEmpty()) {
+            this.tickerShown = true;
+            this.tickerRect[0] = rx;
+            this.tickerRect[1] = y;
+            this.tickerRect[2] = rw;
+            this.tickerRect[3] = V2.FOOT;
+            drawTicker(canvas, StockMarketState.tickerNews(), rx, y, rw);
+        } else {
+            String hint = view.footHint();
+            V2.text(canvas, hint != null ? hint : defaultHint(), V2.FS_XS, ShopTheme.text3(), rx, cy, rw,
+                    Text.Align.RIGHT);
+        }
+    }
+
+    /** 底栏新闻滚动播报：近期快讯首尾相接从右往左循环，利好红、利空绿。点击跳到该股行情。 */
+    private static void drawTicker(Canvas canvas, List<StockMarketState.News> news, float x, float y, float w) {
         final float gap = 18.0F;
         float total = 0.0F;
         float[] widths = new float[news.size()];
         for (int i = 0; i < news.size(); i++) {
-            widths[i] = Text.width(news.get(i).banner(), ShopTheme.regular(), Text.SMALL);
+            widths[i] = V2.width(news.get(i).banner(), V2.FS_S, false);
             total += widths[i] + gap;
         }
-        Draw.fill(canvas, x, tabY + 1.0F, w, TAB_H - 2.0F, 2.0F, Draw.alpha(ShopTheme.accentTint(), 0.55F));
         int save = canvas.save();
-        Draw.clip(canvas, x + 2.0F, tabY, w - 4.0F, TAB_H);
-        float centerY = tabY + TAB_H / 2.0F;
+        Draw.clip(canvas, x, y, w, V2.FOOT);
+        float centerY = y + V2.FOOT / 2.0F;
         float offset = total <= w - 6.0F ? 0.0F : (System.currentTimeMillis() % 1_000_000L) / 1000.0F * 22.0F % total;
         float cursor = x + 3.0F - offset;
         for (int pass = 0; pass < 2 && cursor < x + w; pass++) {
@@ -151,8 +170,7 @@ public final class StockMarketPage implements AddonPage {
                 StockMarketState.News n = news.get(i);
                 if (cursor + widths[i] > x) {
                     int color = n.impact() >= 0 ? ShopTheme.red() : ShopTheme.green();
-                    Text.drawLine(canvas, n.banner(), ShopTheme.regular(), Text.SMALL, color,
-                            cursor, centerY, widths[i] + 1.0F, Text.Align.LEFT);
+                    V2.text(canvas, n.banner(), V2.FS_S, color, cursor, centerY, widths[i] + 1.0F, Text.Align.LEFT);
                 }
                 cursor += widths[i] + gap;
             }
@@ -163,54 +181,56 @@ public final class StockMarketPage implements AddonPage {
         canvas.restoreToCount(save);
     }
 
-    private String hint() {
-        if (!StockMarketState.enabled) {
-            return Component.translatable("gui.stock.hint_closed").getString();
-        }
-        if (!StockMarketState.session) {
-            return Component.translatable("gui.stock.hint_session").getString();
-        }
+    private static String defaultHint() {
         return Component.translatable("gui.stock.hint",
                 String.format(Locale.ROOT, "%.2f", StockMarketState.feeBps / 100.0D)).getString();
     }
 
+    // ------------------------------------------------------------------ 输入
+
     @Override
     public boolean mouseClicked(AddonFrame f, double mouseX, double mouseY, int button) {
-        if (button != 0) {
-            return false;
-        }
-        int count = tabCount();
-        float tabY = f.barTop() + 2.0F;
-        for (int i = 0; i < count; i++) {
-            float bx = tabX(i, f);
-            if (mouseX >= bx && mouseX < bx + TAB_W && mouseY >= tabY && mouseY < tabY + TAB_H) {
-                this.tab = Tab.values()[i];
+        if (button == 0) {
+            int hit = segHit(mouseX, mouseY);
+            if (hit >= 0) {
+                switchTo(Tab.values()[hit]);
+                return true;
+            }
+            if (this.tickerShown && mouseX >= this.tickerRect[0] && mouseX < this.tickerRect[0] + this.tickerRect[2]
+                    && mouseY >= this.tickerRect[1] && mouseY < this.tickerRect[1] + this.tickerRect[3]) {
+                StockMarketState.select(StockMarketState.newsSymbol);
+                switchTo(Tab.QUOTE);
                 return true;
             }
         }
-        // 点击底部新闻播报条可直接跳转到播报对应的股票行情
-        float messageX = tabX(count, f) + 2.0F;
-        if (!StockMarketState.tickerNews().isEmpty() && mouseX >= messageX && mouseY >= tabY && mouseY < tabY + TAB_H) {
-            StockMarketState.select(StockMarketState.newsSymbol);
-            this.tab = Tab.QUOTE;
-            return true;
+        return this.views[this.tab.ordinal()].mouseClicked(body(f), mouseX, mouseY, button);
+    }
+
+    private int segHit(double mx, double my) {
+        if (my < this.segY || my >= this.segY + V2.CTRL) {
+            return -1;
         }
-        return this.views[this.tab.ordinal()].mouseClicked(f, mouseX, mouseY, button);
+        for (int i = 0; i < this.segRects.length && i < tabCount(); i++) {
+            if (mx >= this.segRects[i][0] && mx < this.segRects[i][0] + this.segRects[i][1]) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     @Override
     public boolean mouseReleased(AddonFrame f, double mouseX, double mouseY, int button) {
-        return this.views[this.tab.ordinal()].mouseReleased(f, mouseX, mouseY, button);
+        return this.views[this.tab.ordinal()].mouseReleased(body(f), mouseX, mouseY, button);
     }
 
     @Override
     public boolean mouseDragged(AddonFrame f, double mouseX, double mouseY, int button, double dragX, double dragY) {
-        return this.views[this.tab.ordinal()].mouseDragged(f, mouseX, mouseY, button, dragX, dragY);
+        return this.views[this.tab.ordinal()].mouseDragged(body(f), mouseX, mouseY, button, dragX, dragY);
     }
 
     @Override
     public boolean mouseScrolled(AddonFrame f, double mouseX, double mouseY, double amount) {
-        return this.views[this.tab.ordinal()].mouseScrolled(f, mouseX, mouseY, amount);
+        return this.views[this.tab.ordinal()].mouseScrolled(body(f), mouseX, mouseY, amount);
     }
 
     @Override

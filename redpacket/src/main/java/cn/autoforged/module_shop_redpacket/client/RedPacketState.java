@@ -24,6 +24,9 @@ public final class RedPacketState {
     public static long maxTotal = Long.MAX_VALUE;
     public static int expireMinutes = 1440;
 
+    /** 最近一次收到的详情回包（页面右栏「最近查看的红包」用）；null = 还没看过。 */
+    public static CompoundTag lastDetail;
+
     public static Component message = Component.empty();
     public static boolean messageError;
     public static boolean waiting;
@@ -96,7 +99,8 @@ public final class RedPacketState {
         if (!currency.isEmpty()) {
             return currency;
         }
-        return fallback == null || fallback.isEmpty() ? "星币" : fallback;
+        return fallback == null || fallback.isEmpty()
+                ? Component.translatable("gui.module_shop_redpacket.currency_default").getString() : fallback;
     }
 
     public static long parse(String text) {
@@ -123,25 +127,13 @@ public final class RedPacketState {
         if (waiting) {
             return false;
         }
-        String cur = currencyName(fallbackCurrency);
+        Component error = validate(currencyName(fallbackCurrency), knownBalance, true);
+        if (error != null) {
+            showError(error);
+            return false;
+        }
         long c = parse(count);
         long t = parse(total);
-        if (c < 1L || c > maxCount) {
-            showError(Component.translatable("msg.module_shop_redpacket.bad_count", maxCount));
-            return false;
-        }
-        if (t < minTotal || t > maxTotal) {
-            showError(Component.translatable("msg.module_shop_redpacket.bad_total", minTotal, maxTotal, cur));
-            return false;
-        }
-        if (t < c) {
-            showError(Component.translatable("msg.module_shop_redpacket.total_lt_count", cur));
-            return false;
-        }
-        if (knownBalance >= 0L && t > knownBalance) {
-            showError(Component.translatable("msg.module_shop_redpacket.insufficient", t, cur, knownBalance));
-            return false;
-        }
         CompoundTag tag = new CompoundTag();
         tag.putString("type", "send");
         tag.putInt("count", (int) c);
@@ -156,7 +148,32 @@ public final class RedPacketState {
         return true;
     }
 
-    /** 表单下方的预览文字。 */
+    /**
+     * 校验当前表单，返回第一条错误（没有错误返回 null）。{@code strict} = 提交时：没填的项也算错；
+     * 否则（页面实时提示）只检查已经填了的项，不对空白处报错。余额 &lt; 0 表示未知，跳过余额检查。
+     */
+    public static Component validate(String cur, long knownBalance, boolean strict) {
+        long c = parse(count);
+        long t = parse(total);
+        if ((strict || !count.isEmpty()) && (c < 1L || c > maxCount)) {
+            return Component.translatable("msg.module_shop_redpacket.bad_count", maxCount);
+        }
+        if ((strict || !total.isEmpty()) && (t < minTotal || t > maxTotal)) {
+            return Component.translatable("msg.module_shop_redpacket.bad_total", minTotal, maxTotal, cur);
+        }
+        if (c >= 1L && t >= 1L && t < c) {
+            return Component.translatable("msg.module_shop_redpacket.total_lt_count", cur);
+        }
+        if (knownBalance >= 0L && t > knownBalance) {
+            return Component.translatable("msg.module_shop_redpacket.insufficient", t, cur, knownBalance);
+        }
+        if (!strict && password.startsWith("/")) {
+            return Component.translatable("msg.module_shop_redpacket.password_slash");
+        }
+        return null;
+    }
+
+    /** 表单下方的预览文字（原版回退界面用）。 */
     public static Component preview(String fallbackCurrency) {
         String cur = currencyName(fallbackCurrency);
         long c = parse(count);

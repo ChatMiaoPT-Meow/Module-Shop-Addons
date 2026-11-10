@@ -8,9 +8,9 @@
 | --- | --- |
 | 显示名 | module-shop: Red envelope |
 | modid | `module_shop_redpacket`（NeoForge 的 modid 只能是小写字母、数字、下划线） |
-| 版本 | 1.0.1 |
+| 版本 | 1.1.0 |
 | 游戏 / 加载器 | Minecraft 1.21.1 · NeoForge 21.1.x |
-| 前置 | **模块商店 1.0.3+**（两端）· **AtomLib 0.1.0-beta 起**（已验证 0.4.0）（仅客户端，模块商店本来就需要） |
+| 前置 | **模块商店 1.1.0+**（用到 API 1.3 的 UI v2 套件）（两端）· **AtomLib 0.1.0-beta 起**（已验证 0.4.0）（仅客户端，模块商店本来就需要） |
 | 许可 | MIT |
 | 主体仓库 | [ChatMiaoPT-Meow/Module-Shop](https://github.com/ChatMiaoPT-Meow/Module-Shop) |
 
@@ -21,7 +21,7 @@
 
 | 位置 | 放进 `mods/` 的文件 |
 | --- | --- |
-| 服务端 | `module_shop-1.0.3.jar` + `module_shop_redpacket-1.0.1.jar`（服务端**不需要** AtomLib） |
+| 服务端 | `module_shop-1.1.0.jar` + `module_shop_redpacket-1.1.0.jar`（服务端**不需要** AtomLib） |
 | 客户端 | 上面两个 + `atomlib-1.21.1-neoforge-0.4.0.jar`（0.1.0-beta 也可） |
 
 两端都要装红包附属（界面在客户端，红包逻辑在服务端）。
@@ -110,13 +110,13 @@ src/main/resources/assets/module_shop_redpacket/lang/   zh_cn / en_us
 
 ## 构建
 
-本仓库可以单独构建，只需要模块商店的**公共 API jar**（`module_shop-1.0.6-api.jar`，含 UI 套件）。任选一种方式提供：
+本仓库可以单独构建，只需要模块商店的**公共 API jar**（`module_shop-1.1.0-api.jar`，含 UI 套件）。任选一种方式提供：
 
-1. 把 `module_shop-1.0.6-api.jar` 放进本仓库的 `libs/`（想用 `runClient` 一起加载主体，就把 `module_shop-1.0.6.jar` 也放进去）；
+1. 把 `module_shop-1.1.0-api.jar` 放进本仓库的 `libs/`（想用 `runClient` 一起加载主体，就把 `module_shop-1.1.0.jar` 也放进去）；
 2. 或者指向本地已构建的模块商店主仓库：`./gradlew build -Pmodule_shop_root=../Module-Shop`。
 
 ```bash
-./gradlew build          # 产物：build/libs/module_shop_redpacket-1.0.1.jar
+./gradlew build          # 产物：build/libs/module_shop_redpacket-1.1.0.jar
 ```
 
 - 编译所用的主体版本由 `gradle.properties` 的 `module_shop_version` 决定；也可以用 `-Pmodule_shop_api_jar=<文件>` 直接指定。
@@ -124,7 +124,7 @@ src/main/resources/assets/module_shop_redpacket/lang/   zh_cn / en_us
 
 ### 与主体版本的兼容
 
-- 依赖声明是 `module_shop [1.0.3,)`：之后的模块商店版本都能装；
+- 依赖声明是 `module_shop [1.1.0,)`：之后的模块商店版本都能装；
 - 只用公共 API 与 UI 套件，模块商店承诺这两部分在 1.x 内只增不改 → **已发布的红包 jar 在新版本主体上照样能用，不用跟着更新**；
 - 启动时检查公共 API 主版本是 1、次版本 ≥ 1（API 出现不兼容的 2.x 时会明确报错，而不是运行中出问题）；
 - 万一红包页面在某个新版本上出错，商店会停用这个页面并自动改用原版的发红包界面，商店和其它模块不受影响。

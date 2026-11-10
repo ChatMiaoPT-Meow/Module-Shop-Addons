@@ -5,8 +5,8 @@
 | 项 | 值 |
 | --- | --- |
 | modid | `module_shop_blind` |
-| 版本 | 3.4.0（网络协议 "7"） |
-| 前置 | 模块商店 1.0.3+（两端）· AtomLib 0.1.0-beta 起（仅客户端，已验证 0.4.0） |
+| 版本 | 3.5.0（网络协议 "7"） |
+| 前置 | 模块商店 1.1.0+（两端）· AtomLib 0.1.0-beta 起（仅客户端，已验证 0.4.0） |
 | 许可 | MIT |
 
 ## 玩法
@@ -23,5 +23,5 @@
 ## 构建
 
 ```bash
-./gradlew build -Pmodule_shop_root=<模块商店主仓库目录>   # 产物：build/libs/module_shop_blind-3.4.0.jar
+./gradlew build -Pmodule_shop_root=<模块商店主仓库目录>   # 产物：build/libs/module_shop_blind-3.5.0.jar
 ```

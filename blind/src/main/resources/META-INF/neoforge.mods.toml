@@ -4,7 +4,7 @@ license="MIT"
 
 [[mods]]
 modId="module_shop_blind"
-version="3.4.0"
+version="3.5.0"
 displayName="Module Shop Blind Vault"
 authors="ChatMiaoPT-Meow"
 description='''
@@ -29,7 +29,7 @@ description='''
 [[dependencies.module_shop_blind]]
     modId="module_shop"
     type="required"
-    versionRange="[1.0.3,)"
+    versionRange="[1.1.0,)"
     ordering="AFTER"
     side="BOTH"
 

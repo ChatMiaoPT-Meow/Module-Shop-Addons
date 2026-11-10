@@ -5,8 +5,8 @@ import cn.autoforged.module_shop.api.client.AddonPageHost;
 import cn.autoforged.module_shop.api.client.ShopTheme;
 import cn.autoforged.module_shop.client.ui.render.Draw;
 import cn.autoforged.module_shop.client.ui.render.Text;
-import cn.autoforged.module_shop.client.ui.widget.Button;
-import cn.autoforged.module_shop.client.ui.widget.ScrollController;
+import cn.autoforged.module_shop.client.ui.v2.ListTable;
+import cn.autoforged.module_shop.client.ui.v2.V2;
 import cn.autoforged.module_shop.client.ui.widget.SkiaTextField;
 import cn.autoforged.module_shop_stock.client.StockMarketState;
 import io.github.humbleui.skija.Canvas;
@@ -15,29 +15,20 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.Component;
 
-/** 管理台：股票列表 / 新建与编辑 / 消息事件 / 审计。 */
+/** 管理台（UI v2）：股票列表（ListTable）/ 新建与编辑 / 消息事件 / 审计列表。 */
 public final class AdminView implements StockView {
     private enum Mode { LIST, FORM, NEWS, AUDIT }
 
-    private static final float PAD = 4.0F;
-    private static final float ROW_H = 17.0F;
-    private static final float FIELD_H = 14.0F;
-    private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm")
+    private static final float PAD = 8.0F;
+    private static final float ACTION_H = 22.0F;
+    private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("MM-dd HH:mm")
             .withZone(ZoneId.systemDefault());
 
-    private final ScrollController scroll = new ScrollController();
-    private final Button[] tabs = new Button[4];
-    private final Button save;
-    private final Button cancel;
-    private final Button publish;
-    private final Button edit;
-    private final Button halt;
-    private final Button listing;
-    private final Button remove;
-    private final Button dividend;
+    private static final ListTable STOCKS = new ListTable();
+    private static final ListTable AUDIT = new ListTable();
 
+    private final Ui.Hits hits = new Ui.Hits();
     private SkiaTextField symbol;
     private SkiaTextField name;
     private SkiaTextField sector;
@@ -52,22 +43,11 @@ public final class AdminView implements StockView {
     private boolean editing;
     private long confirmRemoveAt;
     private long lastRequest;
+    private float[][] modeRects = new float[0][2];
+    private float modeY;
 
-    public AdminView() {
-        String[] labels = {"股票", "新建", "消息", "审计"};
-        for (int i = 0; i < labels.length; i++) {
-            Mode target = Mode.values()[i];
-            this.tabs[i] = new Button(Button.Kind.TAB, labels[i], () -> open(target))
-                    .radius(2.0F).fontSize(Text.SMALL);
-        }
-        this.save = new Button(Button.Kind.ACCENT, "保存", this::submitForm).radius(2.0F).fontSize(Text.SMALL);
-        this.cancel = new Button(Button.Kind.NORMAL, "取消", this::resetForm).radius(2.0F).fontSize(Text.SMALL);
-        this.publish = new Button(Button.Kind.ACCENT, "发布", this::submitNews).radius(2.0F).fontSize(Text.SMALL);
-        this.edit = new Button(Button.Kind.NORMAL, "编辑", this::editSelected).radius(2.0F).fontSize(Text.SMALL);
-        this.halt = new Button(Button.Kind.NORMAL, "停牌", this::toggleHalt).radius(2.0F).fontSize(Text.SMALL);
-        this.listing = new Button(Button.Kind.NORMAL, "下架", this::toggleListing).radius(2.0F).fontSize(Text.SMALL);
-        this.remove = new Button(Button.Kind.DANGER, "删除", this::removeSelected).radius(2.0F).fontSize(Text.SMALL);
-        this.dividend = new Button(Button.Kind.NORMAL, "分红", this::payDividend).radius(2.0F).fontSize(Text.SMALL);
+    private static String tr(String key, Object... args) {
+        return Ui.tr(key, args);
     }
 
     private void open(Mode target) {
@@ -80,19 +60,19 @@ public final class AdminView implements StockView {
 
     @Override
     public void init(AddonPageHost host) {
-        this.symbol = field(host, 8, "代码", false);
-        this.name = field(host, 24, "名称", false);
-        this.sector = field(host, 8, "行业", false);
-        this.base = field(host, 7, "基准价", true);
-        this.vol = field(host, 5, "波动", false);
-        this.depth = field(host, 7, "深度", true);
-        this.impact = field(host, 3, "涨跌%", false);
-        this.news = field(host, 60, "消息内容", false);
+        this.symbol = field(host, 8, tr("gui.stock.admin_symbol"), false);
+        this.name = field(host, 24, tr("gui.stock.admin_name"), false);
+        this.sector = field(host, 8, tr("gui.stock.admin_sector"), false);
+        this.base = field(host, 7, tr("gui.stock.admin_base"), true);
+        this.vol = field(host, 5, tr("gui.stock.admin_vol"), false);
+        this.depth = field(host, 7, tr("gui.stock.v2.admin.depth"), true);
+        this.impact = field(host, 3, tr("gui.stock.admin_impact"), false);
+        this.news = field(host, 60, tr("gui.stock.admin_news"), false);
     }
 
     private SkiaTextField field(AddonPageHost host, int maxLength, String placeholder, boolean digits) {
         SkiaTextField field = new SkiaTextField(host.screen(), host.font(), maxLength)
-                .placeholder(placeholder).fontSize(Text.SMALL);
+                .placeholder(placeholder).fontSize(V2.FS_S);
         if (digits) {
             field.editBox().setFilter(text -> text.chars().allMatch(Character::isDigit));
         }
@@ -100,8 +80,29 @@ public final class AdminView implements StockView {
         return field;
     }
 
+    // ------------------------------------------------------------------ 绘制
+
     @Override
-    public void render(Canvas canvas, AddonFrame f) {
+    public void toolbar(Canvas c, AddonFrame f, float x, float y, float w) {
+        if (!StockMarketState.admin) {
+            return;
+        }
+        float cy = y + V2.BAR / 2.0F;
+        String[] labels = {tr("gui.stock.admin_tab_stocks"), tr("gui.stock.admin_tab_new"),
+                tr("gui.stock.admin_tab_news"), tr("gui.stock.admin_tab_audit")};
+        this.modeY = cy - V2.CTRL / 2.0F;
+        this.modeRects = V2.segmented(c, labels, this.mode.ordinal(), x, this.modeY, null);
+        float[] last = this.modeRects[this.modeRects.length - 1];
+        float rx = last[0] + last[1] + 10.0F;
+        if (x + w - rx > 30.0F) {
+            V2.text(c, tr("gui.stock.admin_stock_count", StockMarketState.adminStocks().size()), V2.FS_S,
+                    ShopTheme.text3(), rx, cy, x + w - rx, Text.Align.RIGHT);
+        }
+    }
+
+    @Override
+    public void render(Canvas c, AddonFrame b) {
+        this.hits.clear();
         if (!StockMarketState.admin) {
             return;
         }
@@ -110,86 +111,26 @@ public final class AdminView implements StockView {
             this.lastRequest = now;
             StockMarketState.requestAdmin();
         }
-        float x = f.x() + PAD;
-        float y = f.y() + 2.0F;
-        float w = f.w() - PAD * 2.0F;
-        float bottom = f.listBottom() - 2.0F;
-
-        float tabW = 36.0F;
-        for (int i = 0; i < this.tabs.length; i++) {
-            this.tabs[i].selected(this.mode == Mode.values()[i])
-                    .bounds(x + i * (tabW + 2.0F), y, tabW, 12.0F);
-            this.tabs[i].render(canvas, f.mouseX(), f.mouseY(), f.dtMs());
-        }
-        Text.drawLine(canvas, StockMarketState.adminStocks().size() + " 只", ShopTheme.regular(), Text.SMALL,
-                ShopTheme.text3(), x + w - 40.0F, y + 6.0F, 38.0F, Text.Align.RIGHT);
-
         hideInactiveFields();
         switch (this.mode) {
-            case LIST -> renderList(canvas, f, x, y + 15.0F, w, bottom);
-            case FORM -> renderForm(canvas, f, x, y + 15.0F, w);
-            case NEWS -> renderNews(canvas, f, x, y + 15.0F, w);
-            case AUDIT -> renderAudit(canvas, x, y + 15.0F, w, bottom);
+            case LIST -> renderList(c, b);
+            case FORM -> renderForm(c, b);
+            case NEWS -> renderNews(c, b);
+            case AUDIT -> renderAudit(c, b);
             default -> {
             }
         }
     }
 
-    private void renderList(Canvas canvas, AddonFrame f, float x, float y, float w, float bottom) {
-        Text.drawLine(canvas, Component.translatable("gui.stock.admin_columns").getString(), ShopTheme.regular(),
-                Text.SMALL, ShopTheme.text3(), x + 3.0F, y + 4.0F, w - 6.0F, Text.Align.LEFT);
-        float top = y + 9.0F;
-        float viewH = Math.max(20.0F, bottom - top - 20.0F);
-        List<StockMarketState.AdminStock> stocks = StockMarketState.adminStocks();
-        this.scroll.setContent(stocks.size() * ROW_H, viewH);
-        this.scroll.update();
-
-        int saved = canvas.save();
-        try {
-            Draw.clip(canvas, x, top, w, viewH);
-            for (int i = 0; i < stocks.size(); i++) {
-                float rowY = top + i * ROW_H - this.scroll.offset();
-                if (rowY + ROW_H < top || rowY > top + viewH) {
-                    continue;
-                }
-                StockMarketState.AdminStock stock = stocks.get(i);
-                boolean hover = f.mouseY() >= rowY && f.mouseY() < rowY + ROW_H - 1.0F;
-                if (stock.symbol.equals(this.selected)) {
-                    Draw.fill(canvas, x, rowY, w, ROW_H - 1.0F, 2.0F, ShopTheme.accentTint());
-                } else if (hover) {
-                    Draw.fill(canvas, x, rowY, w, ROW_H - 1.0F, 2.0F, ShopTheme.rowHover());
-                }
-                Text.drawLine(canvas, stock.symbol, ShopTheme.bold(), Text.SMALL, ShopTheme.text(), x + 3.0F,
-                        rowY + 8.0F, 40.0F, Text.Align.LEFT);
-                String tag = (stock.halted ? "停 " : "") + (stock.enabled ? "" : "下 ");
-                Text.drawLine(canvas, tag + stock.name, ShopTheme.regular(), 6.5F,
-                        stock.halted ? ShopTheme.gold() : stock.enabled ? ShopTheme.text2() : ShopTheme.text3(),
-                        x + 45.0F, rowY + 8.0F, w * 0.44F, Text.Align.LEFT);
-                Text.drawLine(canvas, stock.holders + "人 " + StockMarketState.number(stock.price),
-                        ShopTheme.regular(), Text.SMALL, ShopTheme.text3(), x + w * 0.62F, rowY + 8.0F, w * 0.36F,
-                        Text.Align.RIGHT);
-            }
-        } finally {
-            canvas.restoreToCount(saved);
-        }
-        this.scroll.drawBar(canvas, x, top, w, viewH, f.mouseX(), f.mouseY(), f.dtMs());
-
-        float buttonY = bottom - 14.0F;
-        float buttonW = (w - 8.0F) / 5.0F;
-        StockMarketState.AdminStock current = currentStock();
-        boolean confirm = this.confirmRemoveAt > 0L && System.currentTimeMillis() - this.confirmRemoveAt < 4000L;
-        this.edit.enabled(current != null).bounds(x, buttonY, buttonW, 13.0F).visible(true);
-        this.halt.label(current != null && current.halted ? "复牌" : "停牌")
-                .enabled(current != null).bounds(x + buttonW + 2.0F, buttonY, buttonW, 13.0F).visible(true);
-        this.listing.label(current != null && current.enabled ? "下架" : "上架")
-                .enabled(current != null).bounds(x + (buttonW + 2.0F) * 2, buttonY, buttonW, 13.0F).visible(true);
-        this.remove.label(confirm ? "确认删" : "删除")
-                .enabled(current != null).bounds(x + (buttonW + 2.0F) * 3, buttonY, buttonW, 13.0F).visible(true);
-        this.dividend.enabled(StockMarketState.fund > 0L)
-                .bounds(x + (buttonW + 2.0F) * 4, buttonY, buttonW, 13.0F).visible(true);
-        for (Button button : new Button[]{this.edit, this.halt, this.listing, this.remove, this.dividend}) {
-            button.render(canvas, f.mouseX(), f.mouseY(), f.dtMs());
-        }
+    @Override
+    public String footLeft() {
+        return switch (this.mode) {
+            case LIST -> tr("gui.stock.v2.admin.foot_list", StockMarketState.adminStocks().size(),
+                    this.selected.isEmpty() ? "—" : this.selected);
+            case FORM -> tr(this.editing ? "gui.stock.v2.admin.foot_edit" : "gui.stock.v2.admin.foot_new");
+            case NEWS -> tr("gui.stock.v2.admin.foot_news");
+            case AUDIT -> tr("gui.stock.v2.admin.foot_audit", StockMarketState.audit().size());
+        };
     }
 
     private StockMarketState.AdminStock currentStock() {
@@ -201,31 +142,151 @@ public final class AdminView implements StockView {
         return null;
     }
 
-    private void renderForm(Canvas canvas, AddonFrame f, float x, float y, float w) {
-        float gap = 4.0F;
-        float half = (w - gap) / 2.0F;
-        float row2 = y + FIELD_H + 3.0F;
-        float row3 = row2 + FIELD_H + 3.0F;
-
-        this.symbol.bounds(x, y, half, FIELD_H).visible(true).enabled(!this.editing);
-        this.name.bounds(x + half + gap, y, half, FIELD_H).visible(true);
-        this.sector.bounds(x, row2, half, FIELD_H).visible(true);
-        this.base.bounds(x + half + gap, row2, half, FIELD_H).visible(true);
-        this.vol.bounds(x, row3, half, FIELD_H).visible(true);
-        this.depth.bounds(x + half + gap, row3, half, FIELD_H).visible(true);
-        for (SkiaTextField field : new SkiaTextField[]{this.symbol, this.name, this.sector, this.base, this.vol,
-                this.depth}) {
-            field.render(canvas, f.mouseX(), f.mouseY(), f.dtMs());
+    private void renderList(Canvas c, AddonFrame b) {
+        float x = b.x();
+        float tableH = b.h() - ACTION_H;
+        List<StockMarketState.AdminStock> stocks = StockMarketState.adminStocks();
+        float[][] cols = V2.columns(x, b.w(), PAD, 4.0F, 46, 0, 44, 50, 44, 36, 48);
+        String[] heads = {tr("gui.stock.v2.col.code"), tr("gui.stock.v2.col.name"), tr("gui.stock.v2.col.sector"),
+                tr("gui.stock.v2.col.price"), tr("gui.stock.v2.col.holders"), tr("gui.stock.v2.col.orders"),
+                tr("gui.stock.v2.col.status")};
+        Text.Align[] aligns = {Text.Align.LEFT, Text.Align.LEFT, Text.Align.LEFT, Text.Align.RIGHT, Text.Align.RIGHT,
+                Text.Align.RIGHT, Text.Align.LEFT};
+        STOCKS.layout(x, b.y(), b.w(), tableH, cols, heads, aligns, null);
+        STOCKS.sortCol = -1;
+        if (stocks.isEmpty()) {
+            V2.tableHead(c, x, b.y(), b.w(), cols, heads, aligns, -1, false);
+            V2.empty(c, tr("gui.stock.loading"), x, b.y() + V2.HEAD, b.w(), tableH - V2.HEAD);
+        } else {
+            STOCKS.render(c, b.host().items(), b.mouseX(), b.mouseY(), b.dtMs(), stocks.size(), (cv, row, ry, hover) -> {
+                StockMarketState.AdminStock s = stocks.get(row);
+                if (s.symbol.equals(this.selected)) {
+                    STOCKS.selected(cv, ry);
+                }
+                float cy = ry + V2.ROW / 2.0F;
+                V2.bold(cv, s.symbol, V2.FS_S, ShopTheme.text(), cols[0][0], cy, cols[0][1], Text.Align.LEFT);
+                V2.text(cv, s.name, V2.FS, s.enabled ? ShopTheme.text() : ShopTheme.text3(), cols[1][0], cy,
+                        cols[1][1], Text.Align.LEFT);
+                V2.text(cv, s.sector, V2.FS_S, ShopTheme.text3(), cols[2][0], cy, cols[2][1], Text.Align.LEFT);
+                V2.bold(cv, V2.money(s.price), V2.FS_S, ShopTheme.text(), cols[3][0], cy, cols[3][1],
+                        Text.Align.RIGHT);
+                V2.text(cv, String.valueOf(s.holders), V2.FS_S, ShopTheme.text2(), cols[4][0], cy, cols[4][1],
+                        Text.Align.RIGHT);
+                V2.text(cv, String.valueOf(s.orders), V2.FS_S, ShopTheme.text2(), cols[5][0], cy, cols[5][1],
+                        Text.Align.RIGHT);
+                float cursor = cols[6][0];
+                if (s.halted) {
+                    cursor += V2.tag(cv, tr("gui.stock.v2.tag.halt"), ShopTheme.gold(), cursor, cy);
+                }
+                if (!s.enabled) {
+                    V2.tag(cv, tr("gui.stock.v2.tag.delisted"), ShopTheme.text3(), cursor, cy);
+                } else if (!s.halted) {
+                    V2.tag(cv, tr("gui.stock.v2.admin.status_ok"), ShopTheme.accent(), cursor, cy);
+                }
+            });
         }
 
-        float buttonY = row3 + FIELD_H + 4.0F;
-        this.save.bounds(x, buttonY, half, FIELD_H).visible(true);
-        this.cancel.bounds(x + half + gap, buttonY, half, FIELD_H).visible(true);
-        this.save.render(canvas, f.mouseX(), f.mouseY(), f.dtMs());
-        this.cancel.render(canvas, f.mouseX(), f.mouseY(), f.dtMs());
-        Text.drawLine(canvas, Component.translatable("gui.stock.admin_form_hint").getString(),
-                ShopTheme.regular(), Text.SMALL, ShopTheme.text3(), x, buttonY + FIELD_H + 7.0F, w, Text.Align.LEFT);
+        // 操作条
+        float by = b.y() + tableH;
+        Draw.hairline(c, x, by, b.w(), ShopTheme.borderDim());
+        float bx = x + PAD;
+        float bh = V2.CTRL;
+        float cyBtn = by + (ACTION_H - bh) / 2.0F;
+        StockMarketState.AdminStock current = currentStock();
+        boolean has = current != null;
+        boolean confirm = this.confirmRemoveAt > 0L && System.currentTimeMillis() - this.confirmRemoveAt < 4000L;
+        String haltLabel = tr(has && current.halted ? "gui.stock.admin_resume" : "gui.stock.admin_halt");
+        String listLabel = tr(has && !current.enabled ? "gui.stock.admin_list" : "gui.stock.admin_delist");
+        String removeLabel = tr(confirm ? "gui.stock.admin_confirm_remove" : "gui.stock.admin_remove");
+        String[] ids = {"edit", "halt", "listing", "remove"};
+        String[] labels = {tr("gui.stock.admin_edit"), haltLabel, listLabel, removeLabel};
+        for (int i = 0; i < ids.length; i++) {
+            float bw = Math.max(36.0F, V2.buttonWidth(labels[i]));
+            V2.Btn kind = !has ? V2.Btn.DISABLED : i == 3 ? V2.Btn.DANGER : V2.Btn.NORMAL;
+            Ui.button(c, this.hits, ids[i], labels[i], kind, bx, cyBtn, bw, bh, b.mouseX(), b.mouseY());
+            bx += bw + 4.0F;
+        }
+        bx += 6.0F;
+        String dividend = tr("gui.stock.admin_dividend");
+        float dw = Math.max(36.0F, V2.buttonWidth(dividend));
+        Ui.button(c, this.hits, "dividend", dividend, StockMarketState.fund > 0L ? V2.Btn.PRIMARY : V2.Btn.DISABLED,
+                bx, cyBtn, dw, bh, b.mouseX(), b.mouseY());
+        V2.text(c, tr("gui.stock.v2.admin.fund", V2.money(StockMarketState.fund)), V2.FS_S, ShopTheme.text2(),
+                bx + dw + 8.0F, by + ACTION_H / 2.0F, x + b.w() - PAD - (bx + dw + 8.0F), Text.Align.LEFT);
     }
+
+    private void placeField(Canvas c, AddonFrame b, SkiaTextField field, String caption, float x, float y, float w) {
+        V2.section(c, caption, x, y + 3.0F, w);
+        field.bounds(x, y + 8.0F, w, V2.CTRL).visible(true);
+        field.render(c, b.mouseX(), b.mouseY(), b.dtMs());
+    }
+
+    private void renderForm(Canvas c, AddonFrame b) {
+        float x = b.x() + PAD;
+        float w = b.w() - PAD * 2.0F;
+        float gap = 8.0F;
+        float colW = (w - gap) / 2.0F;
+        float y = b.y() + 8.0F;
+        float row = 8.0F + V2.CTRL + 7.0F;
+        this.symbol.enabled(!this.editing);
+        placeField(c, b, this.symbol, tr("gui.stock.admin_symbol"), x, y, colW);
+        placeField(c, b, this.name, tr("gui.stock.admin_name"), x + colW + gap, y, colW);
+        placeField(c, b, this.sector, tr("gui.stock.admin_sector"), x, y + row, colW);
+        placeField(c, b, this.base, tr("gui.stock.admin_base"), x + colW + gap, y + row, colW);
+        placeField(c, b, this.vol, tr("gui.stock.admin_vol"), x, y + row * 2.0F, colW);
+        placeField(c, b, this.depth, tr("gui.stock.v2.admin.depth"), x + colW + gap, y + row * 2.0F, colW);
+        float by = y + row * 3.0F + 2.0F;
+        Ui.button(c, this.hits, "save", tr("gui.stock.admin_save"), V2.Btn.PRIMARY, x, by, colW, V2.CTRL,
+                b.mouseX(), b.mouseY());
+        Ui.button(c, this.hits, "cancel", tr("gui.stock.admin_cancel"), V2.Btn.NORMAL, x + colW + gap, by, colW,
+                V2.CTRL, b.mouseX(), b.mouseY());
+        V2.text(c, tr("gui.stock.admin_form_hint"), V2.FS_S, ShopTheme.text3(), x, by + V2.CTRL + 9.0F, w,
+                Text.Align.LEFT);
+    }
+
+    private void renderNews(Canvas c, AddonFrame b) {
+        float x = b.x() + PAD;
+        float w = b.w() - PAD * 2.0F;
+        float y = b.y() + 8.0F;
+        float gap = 6.0F;
+        float sw = 80.0F;
+        float iw = 56.0F;
+        float pubW = Math.max(40.0F, V2.buttonWidth(tr("gui.stock.admin_publish")) + 12.0F);
+        placeField(c, b, this.symbol, tr("gui.stock.admin_symbol"), x, y, sw);
+        placeField(c, b, this.impact, tr("gui.stock.admin_impact"), x + sw + gap, y, iw);
+        Ui.button(c, this.hits, "publish", tr("gui.stock.admin_publish"), V2.Btn.PRIMARY, x + sw + iw + gap * 2.0F,
+                y + 8.0F, pubW, V2.CTRL, b.mouseX(), b.mouseY());
+        float ny = y + 8.0F + V2.CTRL + 7.0F;
+        placeField(c, b, this.news, tr("gui.stock.admin_news"), x, ny, w);
+        V2.text(c, tr("gui.stock.admin_news_hint"), V2.FS_S, ShopTheme.text3(), x, ny + 8.0F + V2.CTRL + 9.0F, w,
+                Text.Align.LEFT);
+    }
+
+    private void renderAudit(Canvas c, AddonFrame b) {
+        List<StockMarketState.AuditRow> rows = StockMarketState.audit();
+        float[][] cols = V2.columns(b.x(), b.w(), PAD, 6.0F, 66, 70, 60, 0);
+        String[] heads = {tr("gui.stock.v2.col.time"), tr("gui.stock.v2.col.actor"), tr("gui.stock.v2.col.action"),
+                tr("gui.stock.v2.col.detail")};
+        Text.Align[] aligns = {Text.Align.LEFT, Text.Align.LEFT, Text.Align.LEFT, Text.Align.LEFT};
+        AUDIT.layout(b.x(), b.y(), b.w(), b.h(), cols, heads, aligns, null);
+        AUDIT.sortCol = -1;
+        if (rows.isEmpty()) {
+            V2.tableHead(c, b.x(), b.y(), b.w(), cols, heads, aligns, -1, false);
+            V2.empty(c, tr("gui.stock.no_audit"), b.x(), b.y() + V2.HEAD, b.w(), b.h() - V2.HEAD);
+            return;
+        }
+        AUDIT.render(c, b.host().items(), b.mouseX(), b.mouseY(), b.dtMs(), rows.size(), (cv, row, ry, hover) -> {
+            StockMarketState.AuditRow r = rows.get(row);
+            float cy = ry + V2.ROW / 2.0F;
+            V2.text(cv, CLOCK.format(Instant.ofEpochMilli(r.time)), V2.FS_S, ShopTheme.text2(), cols[0][0], cy,
+                    cols[0][1], Text.Align.LEFT);
+            V2.text(cv, r.actor, V2.FS_S, ShopTheme.text(), cols[1][0], cy, cols[1][1], Text.Align.LEFT);
+            V2.bold(cv, r.action, V2.FS_S, ShopTheme.text(), cols[2][0], cy, cols[2][1], Text.Align.LEFT);
+            V2.text(cv, r.detail, V2.FS_S, ShopTheme.text2(), cols[3][0], cy, cols[3][1], Text.Align.LEFT);
+        });
+    }
+
+    // ------------------------------------------------------------------ 动作
 
     private void submitForm() {
         String symbolText = this.symbol.value().trim().toUpperCase(java.util.Locale.ROOT);
@@ -270,20 +331,8 @@ public final class AdminView implements StockView {
         this.base.setValue(String.valueOf(stock.base));
         this.vol.setValue(String.format(java.util.Locale.ROOT, "%.3f", stock.volatility));
         this.depth.setValue(String.valueOf(stock.depth));
-        open(Mode.FORM);
-    }
-
-    private void renderNews(Canvas canvas, AddonFrame f, float x, float y, float w) {
-        this.symbol.bounds(x, y, 66.0F, FIELD_H).visible(true).enabled(true);
-        this.impact.bounds(x + 70.0F, y, 44.0F, FIELD_H).visible(true);
-        this.publish.bounds(x + 118.0F, y, 66.0F, FIELD_H).visible(true);
-        this.news.bounds(x, y + FIELD_H + 4.0F, w, FIELD_H).visible(true);
-        this.symbol.render(canvas, f.mouseX(), f.mouseY(), f.dtMs());
-        this.impact.render(canvas, f.mouseX(), f.mouseY(), f.dtMs());
-        this.news.render(canvas, f.mouseX(), f.mouseY(), f.dtMs());
-        this.publish.render(canvas, f.mouseX(), f.mouseY(), f.dtMs());
-        Text.drawLine(canvas, Component.translatable("gui.stock.admin_news_hint").getString(),
-                ShopTheme.regular(), Text.SMALL, ShopTheme.text3(), x, y + FIELD_H * 2.0F + 14.0F, w, Text.Align.LEFT);
+        this.mode = Mode.FORM;
+        this.confirmRemoveAt = 0L;
     }
 
     private void submitNews() {
@@ -292,24 +341,6 @@ public final class AdminView implements StockView {
         tag.putString("impact", this.impact.value());
         tag.putString("text", this.news.value());
         StockMarketState.adminAction("news", tag);
-    }
-
-    private void renderAudit(Canvas canvas, float x, float y, float w, float bottom) {
-        List<StockMarketState.AuditRow> rows = StockMarketState.audit();
-        if (rows.isEmpty()) {
-            Text.drawLine(canvas, Component.translatable("gui.stock.no_audit").getString(), ShopTheme.regular(),
-                    6.5F, ShopTheme.text3(), x, y + 20.0F, w, Text.Align.CENTER);
-            return;
-        }
-        int max = (int) Math.min(rows.size(), Math.floor((bottom - y - 4.0F) / 14.0F));
-        for (int i = 0; i < max; i++) {
-            StockMarketState.AuditRow row = rows.get(i);
-            float rowY = y + i * 14.0F;
-            String line = CLOCK.format(Instant.ofEpochMilli(row.time)) + " " + row.actor + " " + row.action
-                    + " " + row.detail;
-            Text.drawLine(canvas, line, ShopTheme.regular(), Text.SMALL, ShopTheme.text2(), x + 2.0F, rowY + 7.0F,
-                    w - 4.0F, Text.Align.LEFT);
-        }
     }
 
     private void toggleHalt() {
@@ -354,51 +385,61 @@ public final class AdminView implements StockView {
         return tag;
     }
 
+    // ------------------------------------------------------------------ 输入
+
     @Override
-    public boolean mouseClicked(AddonFrame f, double mouseX, double mouseY, int button) {
+    public boolean mouseClicked(AddonFrame f, double mx, double my, int button) {
         if (!StockMarketState.admin) {
             return false;
         }
-        for (Button tab : this.tabs) {
-            if (tab.mouseClicked(mouseX, mouseY, button)) {
-                return true;
-            }
-        }
         for (SkiaTextField field : visibleFields()) {
-            if (field.mouseClicked(mouseX, mouseY, button)) {
+            if (field.mouseClicked(mx, my, button)) {
                 return true;
             }
         }
-        for (Button action : activeButtons()) {
-            if (action.mouseClicked(mouseX, mouseY, button)) {
+        if (button == 0) {
+            int seg = Ui.segHit(this.modeRects, this.modeY, mx, my);
+            if (seg >= 0) {
+                open(Mode.values()[seg]);
+                return true;
+            }
+            String id = this.hits.at(mx, my);
+            if (id != null) {
+                switch (id) {
+                    case "edit" -> editSelected();
+                    case "halt" -> toggleHalt();
+                    case "listing" -> toggleListing();
+                    case "remove" -> removeSelected();
+                    case "dividend" -> payDividend();
+                    case "save" -> submitForm();
+                    case "cancel" -> resetForm();
+                    case "publish" -> submitNews();
+                    default -> {
+                    }
+                }
+                return true;
+            }
+            if (this.mode == Mode.LIST && STOCKS.pressBar(mx, my)) {
+                return true;
+            }
+            if (this.mode == Mode.AUDIT && AUDIT.pressBar(mx, my)) {
                 return true;
             }
         }
         if (this.mode == Mode.LIST) {
-            return clickList(f, mouseX, mouseY);
+            ListTable.Hit hit = STOCKS.click(mx, my);
+            if (hit != null) {
+                List<StockMarketState.AdminStock> stocks = StockMarketState.adminStocks();
+                if (hit.row() >= 0 && hit.row() < stocks.size()) {
+                    this.selected = stocks.get(hit.row()).symbol;
+                    this.confirmRemoveAt = 0L;
+                }
+                return true;
+            }
+        } else if (this.mode == Mode.AUDIT) {
+            return AUDIT.click(mx, my) != null;
         }
         return false;
-    }
-
-    private boolean clickList(AddonFrame f, double mouseX, double mouseY) {
-        float x = f.x() + PAD;
-        float w = f.w() - PAD * 2.0F;
-        float top = f.y() + 2.0F + 15.0F + 9.0F;
-        float viewH = Math.max(20.0F, f.listBottom() - 2.0F - top - 20.0F);
-        if (this.scroll.pressBar(mouseX, mouseY, x, top, w, viewH)) {
-            return true;
-        }
-        if (mouseX < x || mouseX > x + w || mouseY < top || mouseY > top + viewH) {
-            return false;
-        }
-        int index = (int) ((mouseY - top + this.scroll.offset()) / ROW_H);
-        List<StockMarketState.AdminStock> stocks = StockMarketState.adminStocks();
-        if (index < 0 || index >= stocks.size()) {
-            return false;
-        }
-        this.selected = stocks.get(index).symbol;
-        this.confirmRemoveAt = 0L;
-        return true;
     }
 
     private SkiaTextField[] visibleFields() {
@@ -409,10 +450,14 @@ public final class AdminView implements StockView {
         };
     }
 
+    private SkiaTextField[] allFields() {
+        return new SkiaTextField[]{this.symbol, this.name, this.sector, this.base, this.vol, this.depth, this.impact,
+                this.news};
+    }
+
     private void hideInactiveFields() {
         SkiaTextField[] active = visibleFields();
-        for (SkiaTextField field : new SkiaTextField[]{this.symbol, this.name, this.sector, this.base, this.vol,
-                this.depth, this.impact, this.news}) {
+        for (SkiaTextField field : allFields()) {
             if (field == null) {
                 continue;
             }
@@ -427,40 +472,27 @@ public final class AdminView implements StockView {
                 field.visible(false);
             }
         }
-    }
-
-    private Button[] activeButtons() {
-        return switch (this.mode) {
-            case LIST -> new Button[]{this.edit, this.halt, this.listing, this.remove, this.dividend};
-            case FORM -> new Button[]{this.save, this.cancel};
-            case NEWS -> new Button[]{this.publish};
-            default -> new Button[0];
-        };
+        if (this.mode == Mode.NEWS && this.symbol != null) {
+            this.symbol.enabled(true);
+        }
     }
 
     @Override
-    public boolean mouseReleased(AddonFrame f, double mouseX, double mouseY, int button) {
-        boolean handled = this.scroll.releaseBar();
-        for (Button tab : this.tabs) {
-            handled |= tab.mouseReleased(mouseX, mouseY, button);
-        }
-        for (Button action : activeButtons()) {
-            handled |= action.mouseReleased(mouseX, mouseY, button);
-        }
+    public boolean mouseReleased(AddonFrame f, double mx, double my, int button) {
+        boolean handled = STOCKS.releaseBar() | AUDIT.releaseBar();
         for (SkiaTextField field : visibleFields()) {
-            handled |= field.mouseReleased(mouseX, mouseY, button);
+            handled |= field.mouseReleased(mx, my, button);
         }
         return handled;
     }
 
     @Override
-    public boolean mouseDragged(AddonFrame f, double mouseX, double mouseY, int button, double dragX, double dragY) {
-        if (this.mode == Mode.LIST && this.scroll.dragBar(mouseY,
-                Math.max(20.0F, f.listBottom() - 2.0F - (f.y() + 2.0F + 15.0F + 9.0F) - 20.0F))) {
+    public boolean mouseDragged(AddonFrame f, double mx, double my, int button, double dx, double dy) {
+        if (STOCKS.dragBar(my) || AUDIT.dragBar(my)) {
             return true;
         }
         for (SkiaTextField field : visibleFields()) {
-            if (field.mouseDragged(mouseX, mouseY, button, dragX, dragY)) {
+            if (field.mouseDragged(mx, my, button, dx, dy)) {
                 return true;
             }
         }
@@ -468,10 +500,13 @@ public final class AdminView implements StockView {
     }
 
     @Override
-    public boolean mouseScrolled(AddonFrame f, double mouseX, double mouseY, double amount) {
+    public boolean mouseScrolled(AddonFrame f, double mx, double my, double amount) {
+        boolean page = net.minecraft.client.gui.screens.Screen.hasShiftDown();
         if (this.mode == Mode.LIST) {
-            this.scroll.wheel(amount);
-            return true;
+            return STOCKS.wheel(mx, my, amount, page);
+        }
+        if (this.mode == Mode.AUDIT) {
+            return AUDIT.wheel(mx, my, amount, page);
         }
         return false;
     }
@@ -485,14 +520,9 @@ public final class AdminView implements StockView {
 
     @Override
     public void cancelInput() {
-        for (Button tab : this.tabs) {
-            tab.cancelPress();
-        }
-        for (Button action : activeButtons()) {
-            action.cancelPress();
-        }
-        for (SkiaTextField field : new SkiaTextField[]{this.symbol, this.name, this.sector, this.base, this.vol,
-                this.depth, this.impact, this.news}) {
+        STOCKS.releaseBar();
+        AUDIT.releaseBar();
+        for (SkiaTextField field : allFields()) {
             if (field != null) {
                 field.blur();
                 field.visible(false);
