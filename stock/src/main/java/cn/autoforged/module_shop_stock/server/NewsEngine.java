@@ -5,6 +5,9 @@ import cn.autoforged.module_shop_stock.data.StockMarketSavedData;
 import cn.autoforged.module_shop_stock.market.AuditEntry;
 import cn.autoforged.module_shop_stock.market.Quote;
 import cn.autoforged.module_shop_stock.market.StockDef;
+import cn.autoforged.module_shop_stock.market.model.NewsModel;
+import cn.autoforged.module_shop_stock.market.model.PriceModelV3;
+import cn.autoforged.module_shop_stock.market.model.PriceParams;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -20,6 +23,8 @@ import org.slf4j.LoggerFactory;
 public final class NewsEngine {
     private static final Logger LOG = LoggerFactory.getLogger("module_shop_stock/news");
     private static final Random RANDOM = new Random();
+    /** v3 模板缩放后的单条幅度封顶（%）。 */
+    private static final int TEMPLATE_SCALED_CAP = 8;
 
     private record Template(String match, boolean positive, int minPct, int maxPct, String headline) {
     }
@@ -210,10 +215,17 @@ public final class NewsEngine {
 
         StockDef target = candidates.get(RANDOM.nextInt(candidates.size()));
         Template tpl = pickTemplate(target);
-        int maxImpact = StockMarketConfig.AUTO_NEWS_MAX_IMPACT.get();
-        int rawPct = tpl.positive
-                ? randomBetween(tpl.minPct, tpl.maxPct)
-                : -randomBetween(Math.abs(tpl.maxPct), Math.abs(tpl.minPct));
+        boolean v3 = MarketEngine.isV3();
+        int maxImpact = v3 ? StockMarketConfig.PM_AUTO_NEWS_MAX_IMPACT.get() : StockMarketConfig.AUTO_NEWS_MAX_IMPACT.get();
+        int lowAbs = Math.min(Math.abs(tpl.minPct), Math.abs(tpl.maxPct));
+        int highAbs = Math.max(Math.abs(tpl.minPct), Math.abs(tpl.maxPct));
+        if (v3) {
+            // v3：模板幅度整体缩小（默认 x0.35，封顶 8），公允价/现价再各吸收一部分
+            double scale = StockMarketConfig.PM_NEWS_TEMPLATE_SCALE.get();
+            lowAbs = NewsModel.scaleTemplatePct(lowAbs, scale, TEMPLATE_SCALED_CAP);
+            highAbs = NewsModel.scaleTemplatePct(highAbs, scale, TEMPLATE_SCALED_CAP);
+        }
+        int rawPct = tpl.positive ? randomBetween(lowAbs, highAbs) : -randomBetween(lowAbs, highAbs);
         int percent = Math.max(-maxImpact, Math.min(maxImpact, rawPct));
         if (percent == 0) {
             percent = tpl.positive ? 5 : -5;
@@ -226,17 +238,31 @@ public final class NewsEngine {
             int percent, String text, String actor) {
         Quote quote = MarketEngine.quoteOf(data, def);
         long prev = quote.price;
-        long moved = Math.round(prev * (1.0D + percent / 100.0D));
-        if (moved == prev && percent != 0) {
-            moved = prev + (percent > 0 ? 1L : -1L);
-        }
-        long clamped = MarketEngine.clamp(def, quote, moved);
-        quote.moveTo(clamped);
-
         double absPct = Math.abs(percent) / 100.0D;
-        quote.newsBoost = Math.max(quote.newsBoost, absPct * 2.4D);
-        quote.volCluster = Math.min(2.5D, quote.volCluster + absPct * 1.8D);
-        quote.trend = (percent >= 0 ? 1.0D : -1.0D) * Math.max(def.volatility * 0.45D, absPct * 0.18D);
+        long clamped;
+        if (MarketEngine.isV3()) {
+            // v3：先推公允价，现价只吃一部分，余下靠现价追公允价；波动与趋势温和抬升
+            PriceParams params = StockMarketConfig.priceParams();
+            PriceModelV3.Env env = MarketEngine.envOf(params, def, quote, 1.0D);
+            PriceModelV3.State state = MarketEngine.stateOf(quote);
+            double spot = NewsModel.apply(params, state, percent, env.sigmaBase);
+            double[] band = PriceModelV3.band(params, env, state.price);
+            state.price = PriceModelV3.clamp(spot, band[0], band[1]);
+            MarketEngine.writeBack(quote, state);
+            clamped = quote.price;
+        } else {
+            long moved = Math.round(prev * (1.0D + percent / 100.0D));
+            if (moved == prev && percent != 0) {
+                moved = prev + (percent > 0 ? 1L : -1L);
+            }
+            clamped = MarketEngine.clamp(def, quote, moved);
+            quote.moveTo(clamped);
+
+            quote.newsBoost = Math.max(quote.newsBoost, absPct * 2.4D);
+            quote.volCluster = Math.min(2.5D, quote.volCluster + absPct * 1.8D);
+            quote.trend = (percent >= 0 ? 1.0D : -1.0D)
+                    * Math.max(MarketEngine.legacyVolatility(def) * 0.45D, absPct * 0.18D);
+        }
 
         long nowSec = System.currentTimeMillis() / 1000L;
         long wickHigh = Math.max(prev, clamped) + Math.max(1L, Math.round(clamped * absPct * 0.25D));

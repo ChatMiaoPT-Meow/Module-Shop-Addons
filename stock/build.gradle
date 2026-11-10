@@ -24,6 +24,10 @@ neoForge {
     }
 }
 
+repositories {
+    mavenCentral()
+}
+
 // 只编译公共 API jar；完整主体仅供本地运行，不打包进附属。
 def shopVersion = project.module_shop_version.toString()
 def pick = { String key, String fallback -> (project.findProperty(key) ?: fallback).toString() }
@@ -54,6 +58,25 @@ dependencies {
     if (new File(shopJar).isFile()) {
         localRuntime files(shopJar)
     }
+    // 价格模型 v3 的纯 Java 核心单测（不依赖 Minecraft 类）
+    testImplementation platform("org.junit:junit-bom:5.10.2")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+tasks.named("test") {
+    useJUnitPlatform()
+    testLogging { events "passed", "failed", "skipped"; showStandardStreams = true }
+}
+
+// 打印完整验收统计表：./gradlew.bat simulatePriceModel -Pmodule_shop_root=<主仓库> [-PsimPaths=200]
+tasks.register("simulatePriceModel", JavaExec) {
+    group = "verification"
+    description = "运行价格模型 v3 统计模拟并打印验收表"
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = "cn.autoforged.module_shop_stock.market.model.PriceModelSim"
+    args = [(project.findProperty("simPaths") ?: "200").toString()]
+    jvmArgs "-Dstdout.encoding=UTF-8", "-Dfile.encoding=UTF-8"
 }
 
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }

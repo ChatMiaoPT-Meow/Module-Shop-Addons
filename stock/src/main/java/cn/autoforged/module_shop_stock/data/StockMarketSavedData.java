@@ -1,12 +1,17 @@
 package cn.autoforged.module_shop_stock.data;
 
 import cn.autoforged.module_shop_stock.StockMarket;
+import cn.autoforged.module_shop_stock.StockMarketConfig;
 import cn.autoforged.module_shop_stock.market.AuditEntry;
 import cn.autoforged.module_shop_stock.market.Bar;
 import cn.autoforged.module_shop_stock.market.Order;
 import cn.autoforged.module_shop_stock.market.Position;
 import cn.autoforged.module_shop_stock.market.Quote;
 import cn.autoforged.module_shop_stock.market.StockDef;
+import cn.autoforged.module_shop_stock.market.model.PriceModelV3;
+import cn.autoforged.module_shop_stock.market.model.PriceParams;
+import cn.autoforged.module_shop_stock.market.model.VolatilityMigration;
+import cn.autoforged.module_shop_stock.server.MarketEngine;
 import cn.autoforged.module_shop_stock.server.MarketMakerEngine;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -30,8 +35,13 @@ import net.minecraft.world.level.saveddata.SavedData;
 public final class StockMarketSavedData extends SavedData {
     private static final String NAME = "module_shop_stock";
     private static final int DATA_VERSION = 3;
-    /** 区分同为 dataVersion 3 的本地 2.0.x 与 2.2 存档；不是此值的存档首次加载前会被备份。 */
-    public static final String FORMAT = "zip-2.2";
+    /**
+     * 区分同为 dataVersion 3 的本地 2.0.x / 2.2 / 2.3 存档；不是此值的存档首次加载前会被备份。
+     * 同时也是"波动率已迁移到小时口径"的标记：只有读到非此值的存档才做一次 volatility 迁移，保存后写成此值。
+     */
+    public static final String FORMAT = "zip-2.3";
+    /** 2.2 存档的 format；升级到 2.3 时备份为 pre-2.3。 */
+    public static final String FORMAT_2_2 = "zip-2.2";
     private static final int AUDIT_LIMIT = 200;
     private static final int ORDER_HISTORY_LIMIT = 200;
     private static final int WATCH_LIMIT = 48;
@@ -141,7 +151,7 @@ public final class StockMarketSavedData extends SavedData {
             long max = Math.max(min, maxPrice);
             long price = Math.max(min, Math.min(max, def.basePrice));
             quote = new Quote(price);
-            seedBars(quote, price, def.volatility, def.symbol.hashCode());
+            seedBars(quote, def, price, def.symbol.hashCode());
             MarketMakerEngine.rebuildOrderBook(this, def, quote);
             this.quotes.put(def.symbol, quote);
             markDirty();
@@ -151,7 +161,40 @@ public final class StockMarketSavedData extends SavedData {
         return quote;
     }
 
-    private static void seedBars(Quote quote, long basePrice, double volatility, long seed) {
+    /** 新档种子历史：v3 走真实的 v3 价格过程；v2 回滚时沿用旧随机走。 */
+    private static void seedBars(Quote quote, StockDef def, long basePrice, long seed) {
+        if (!MarketEngine.isV3()) {
+            seedBarsLegacy(quote, basePrice, MarketEngine.legacyVolatility(def), seed);
+            return;
+        }
+        long now = System.currentTimeMillis() / 1000L;
+        long alignedNow = now - Math.floorMod(now, 60L);
+        PriceParams params = StockMarketConfig.priceParams();
+        double sigmaBase = Math.max(1e-4D, def.volatility * StockMarketConfig.priceModelVolatilityMultiplier());
+        long base = Math.max(1L, def.basePrice);
+        PriceModelV3.History h = PriceModelV3.generateHistory(params, base, sigmaBase, def.depth,
+                Math.max(1L, base / 4L), base * 4.0D, alignedNow, 60, 72, seed);
+        quote.bars.clear();
+        quote.bars.addAll(h.bars);
+        Bar last = h.bars.get(h.bars.size() - 1);
+        Bar prev = h.bars.get(Math.max(0, h.bars.size() - 2));
+        quote.price = last.close;
+        quote.prevPrice = prev.close;
+        quote.prevClose = h.prevClose;
+        quote.dayOpen = h.dayOpen;
+        quote.dayHigh = Math.max(h.dayHigh, quote.price);
+        quote.dayLow = Math.min(h.dayLow, quote.price);
+        quote.volume = h.volumeLastDay;
+        quote.exact = h.state.price;
+        quote.fairPrice = h.state.fair;
+        quote.sigma = h.state.sigma;
+        quote.mu = h.state.mu;
+        quote.newsBoost = 0.0D;
+        quote.trend = 0.0D;
+        quote.volCluster = 0.0D;
+    }
+
+    private static void seedBarsLegacy(Quote quote, long basePrice, double volatility, long seed) {
         long now = System.currentTimeMillis() / 1000L;
         long alignedNow = now - Math.floorMod(now, 60L);
         quote.bars.clear();
@@ -202,6 +245,8 @@ public final class StockMarketSavedData extends SavedData {
         quote.volume = totalVol;
         quote.trend = trend;
         quote.volCluster = 0.25D;
+        quote.exact = quote.price;
+        quote.fairPrice = quote.price;
     }
 
     public Position position(UUID owner, String symbol) {
@@ -392,6 +437,8 @@ public final class StockMarketSavedData extends SavedData {
     private static StockMarketSavedData load(CompoundTag tag, HolderLookup.Provider registries) {
         StockMarketSavedData data = new StockMarketSavedData();
         int version = tag.getInt("dataVersion");
+        // 非 zip-2.3 的存档：个股 volatility 还是旧口径，读取时迁移一次；保存后 format 变成 zip-2.3，不会再迁。
+        boolean migrateVol = !FORMAT.equals(tag.getString("format"));
         data.revision = tag.getLong("revision");
         data.dayKey = tag.getLong("dayKey");
         data.fund = Math.max(0L, tag.getLong("fund"));
@@ -414,8 +461,11 @@ public final class StockMarketSavedData extends SavedData {
             item.putLong("at", data.lastNewsAt);
             data.newsFeed.addLast(item);
         }
-        data.loadDefs(tag);
-        data.loadQuotes(tag);
+        data.loadDefs(tag, migrateVol);
+        data.loadQuotes(tag, migrateVol);
+        if (migrateVol) {
+            data.setDirty();
+        }
         data.loadPositions(tag);
         data.loadOrders(tag);
         data.loadWatchlist(tag);
@@ -436,7 +486,7 @@ public final class StockMarketSavedData extends SavedData {
         return data;
     }
 
-    private void loadDefs(CompoundTag tag) {
+    private void loadDefs(CompoundTag tag, boolean migrateVol) {
         ListTag list = tag.getList("defs", Tag.TAG_COMPOUND);
         for (int i = 0; i < list.size(); i++) {
             CompoundTag entry = list.getCompound(i);
@@ -448,7 +498,8 @@ public final class StockMarketSavedData extends SavedData {
                     entry.contains("nameKey") ? entry.getString("nameKey") : null,
                     entry.getString("sector"),
                     Math.max(1L, entry.getLong("base")),
-                    clampVolatility(entry.getDouble("vol")),
+                    migrateVol ? VolatilityMigration.migrate(clampVolatility(entry.getDouble("vol")))
+                            : clampVolatility(entry.getDouble("vol")),
                     loadDepth(entry));
             def.enabled = !entry.contains("enabled") || entry.getBoolean("enabled");
             def.halted = entry.getBoolean("halted");
@@ -456,7 +507,7 @@ public final class StockMarketSavedData extends SavedData {
         }
     }
 
-    private void loadQuotes(CompoundTag tag) {
+    private void loadQuotes(CompoundTag tag, boolean migrateVol) {
         ListTag list = tag.getList("quotes", Tag.TAG_COMPOUND);
         for (int i = 0; i < list.size(); i++) {
             CompoundTag entry = list.getCompound(i);
@@ -471,9 +522,16 @@ public final class StockMarketSavedData extends SavedData {
             quote.dayHigh = Math.max(quote.price, entry.getLong("dayHigh"));
             quote.dayLow = Math.max(1L, entry.contains("dayLow") ? entry.getLong("dayLow") : quote.price);
             quote.volume = Math.max(0L, entry.getLong("volume"));
-            quote.newsBoost = entry.getDouble("newsBoost");
+            quote.newsBoost = migrateVol ? 0.0D : entry.getDouble("newsBoost");
             quote.trend = entry.getDouble("trend");
             quote.volCluster = entry.getDouble("volCluster");
+            // v3 字段：旧档缺失时 fair=price、exact=price、sigma=按标定后的个股波动、mu=0
+            quote.exact = entry.contains("exact") ? Math.max(1.0D, entry.getDouble("exact")) : quote.price;
+            quote.fairPrice = entry.contains("fair") ? Math.max(1.0D, entry.getDouble("fair")) : quote.price;
+            StockDef quoteDef = this.defs.get(symbol);
+            quote.sigma = entry.contains("sigma") ? Math.max(0.0D, entry.getDouble("sigma"))
+                    : (quoteDef == null ? 0.0D : quoteDef.volatility);
+            quote.mu = entry.contains("mu") ? entry.getDouble("mu") : 0.0D;
             ListTag bars = entry.getList("bars", Tag.TAG_COMPOUND);
             for (int j = 0; j < bars.size(); j++) {
                 CompoundTag barTag = bars.getCompound(j);
@@ -486,7 +544,11 @@ public final class StockMarketSavedData extends SavedData {
             }
             if (quote.bars.isEmpty()) {
                 StockDef def = this.defs.get(symbol);
-                seedBars(quote, quote.price, def == null ? 0.04D : def.volatility, symbol.hashCode());
+                if (def == null) {
+                    seedBarsLegacy(quote, quote.price, 0.04D, symbol.hashCode());
+                } else {
+                    seedBars(quote, def, quote.price, symbol.hashCode());
+                }
             }
             this.quotes.put(symbol, quote);
         }
@@ -625,7 +687,7 @@ public final class StockMarketSavedData extends SavedData {
             Quote quote = this.quotes.get(def.symbol);
             if (quote == null) {
                 quote = new Quote(def.basePrice);
-                seedBars(quote, quote.price, def.volatility, def.symbol.hashCode());
+                seedBars(quote, def, quote.price, def.symbol.hashCode());
                 this.quotes.put(def.symbol, quote);
             }
             MarketMakerEngine.rebuildOrderBook(this, def, quote);
@@ -742,6 +804,10 @@ public final class StockMarketSavedData extends SavedData {
             out.putDouble("newsBoost", quote.newsBoost);
             out.putDouble("trend", quote.trend);
             out.putDouble("volCluster", quote.volCluster);
+            out.putDouble("exact", quote.exact);
+            out.putDouble("fair", quote.fairPrice);
+            out.putDouble("sigma", quote.sigma);
+            out.putDouble("mu", quote.mu);
             ListTag bars = new ListTag();
             for (Bar bar : quote.bars) {
                 CompoundTag barTag = new CompoundTag();

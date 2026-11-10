@@ -20,6 +20,15 @@ public final class Quote {
     public double trend;
     public double volCluster;
 
+    /** v3：精确现价（未取整）。与 price 偏差超过 0.5 视为被外部改价，读取时回退到 price。 */
+    public double exact;
+    /** v3：公允价（未取整）。 */
+    public double fairPrice;
+    /** v3：瞬时波动率（每√小时，对数）；0 表示未知，首个 tick 会按个股标定值初始化。 */
+    public double sigma;
+    /** v3：趋势（每小时对数漂移）。独立于旧 trend，回滚到 v2 时不会被当成 tick 级漂移。 */
+    public double mu;
+
     /** 五档买盘（买1..买5 价格与挂单量，包含真实玩家限价单与做市商深度）。 */
     public final long[] bidPrices = new long[BOOK_LEVELS];
     public final long[] bidVolumes = new long[BOOK_LEVELS];
@@ -36,12 +45,30 @@ public final class Quote {
         this.dayOpen = this.price;
         this.dayHigh = this.price;
         this.dayLow = this.price;
+        this.exact = this.price;
+        this.fairPrice = this.price;
     }
 
     public void moveTo(long next) {
         long value = Math.max(1L, next);
         this.prevPrice = this.price;
         this.price = value;
+        this.exact = value;
+        if (value > this.dayHigh) {
+            this.dayHigh = value;
+        }
+        if (value < this.dayLow) {
+            this.dayLow = value;
+        }
+    }
+
+    /** v3：按精确价推进，展示价取整；日高低用展示价。 */
+    public void moveToExact(double next) {
+        double e = Math.max(1.0D, next);
+        long value = Math.max(1L, Math.round(e));
+        this.prevPrice = this.price;
+        this.price = value;
+        this.exact = e;
         if (value > this.dayHigh) {
             this.dayHigh = value;
         }

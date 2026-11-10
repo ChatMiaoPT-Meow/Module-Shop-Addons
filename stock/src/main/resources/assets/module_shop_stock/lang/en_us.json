@@ -80,7 +80,7 @@
   "gui.stock.board_head": "Fee fund %s %s · return board",
   "gui.stock.no_board": "Nobody holds a position yet",
   "gui.stock.admin_columns": "Symbol · name · holders / price",
-  "gui.stock.admin_form_hint": "Symbol 2–8 upper case; vol 0.002–0.35; depth 100–1000000",
+  "gui.stock.admin_form_hint": "Symbol 2–8 upper case; hourly vol 0.002–0.35 (recommended 0.01–0.04); depth 100–1000000",
   "gui.stock.admin_news_hint": "Impact -30 to 30; jumps price and updates order book (120 built-in auto headlines)",
   "gui.stock.no_audit": "No admin actions yet",
   "msg.stock.closed": "The stock market is currently closed",

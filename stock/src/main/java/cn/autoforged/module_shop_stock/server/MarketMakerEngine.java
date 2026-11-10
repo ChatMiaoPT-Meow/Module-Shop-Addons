@@ -3,7 +3,10 @@ package cn.autoforged.module_shop_stock.server;
 import cn.autoforged.module_shop_stock.data.StockMarketSavedData;
 import cn.autoforged.module_shop_stock.market.Order;
 import cn.autoforged.module_shop_stock.market.Quote;
+import cn.autoforged.module_shop_stock.StockMarketConfig;
 import cn.autoforged.module_shop_stock.market.StockDef;
+import cn.autoforged.module_shop_stock.market.model.BookMath;
+import cn.autoforged.module_shop_stock.market.model.PriceParams;
 import java.util.List;
 import java.util.Random;
 
@@ -23,8 +26,25 @@ public final class MarketMakerEngine {
     /** 重建单只股票的五档买卖盘口（做市商流动性 + 玩家真实限价单聚合）。 */
     public static void rebuildOrderBook(StockMarketSavedData data, StockDef def, Quote quote) {
         long mid = Math.max(1L, quote.price);
-        // 价差步长：高价股或高波动时刻步长自动放宽
-        long step = Math.max(1L, Math.round(mid * Math.max(0.004D, def.volatility * 0.14D)));
+        boolean v3 = MarketEngine.isV3();
+        PriceParams params = v3 ? StockMarketConfig.priceParams() : null;
+        long step;
+        double skewBidMul;
+        double skewAskMul;
+        if (v3) {
+            // v3：价差跟瞬时 σ（未初始化时用标定值）；库存偏斜由趋势与"现价-公允价"决定
+            double sigma = quote.sigma > 0.0D ? quote.sigma : MarketEngine.sigmaBase(def);
+            step = BookMath.step(params, mid, sigma);
+            double fair = quote.fairPrice > 0.0D ? quote.fairPrice : quote.price;
+            double skew = BookMath.skew(params, quote.mu, quote.price, fair);
+            skewBidMul = 1.0D + skew;
+            skewAskMul = 1.0D - skew;
+        } else {
+            // 价差步长：高价股或高波动时刻步长自动放宽
+            step = Math.max(1L, Math.round(mid * Math.max(0.004D, MarketEngine.legacyVolatility(def) * 0.14D)));
+            skewBidMul = quote.trend >= 0.0D ? 1.18D : 0.86D;
+            skewAskMul = quote.trend < 0.0D ? 1.18D : 0.86D;
+        }
         long baseDepth = Math.max(25L, def.depth / 22L);
         List<Order> openOrders = data == null ? List.of() : data.openOrdersOf(def.symbol);
 
@@ -41,8 +61,8 @@ public final class MarketMakerEngine {
             quote.askPrices[i] = askP;
 
             // 做市商在各档位提供的动态挂单量（随趋势偏向与档位深度微调）
-            double skewBid = quote.trend >= 0.0D ? 1.18D : 0.86D;
-            double skewAsk = quote.trend < 0.0D ? 1.18D : 0.86D;
+            double skewBid = skewBidMul;
+            double skewAsk = skewAskMul;
             double levelWeight = 0.75D + i * 0.22D + RANDOM.nextDouble() * 0.35D;
             long mmBidVol = Math.max(10L, Math.round(baseDepth * levelWeight * skewBid));
             long mmAskVol = Math.max(10L, Math.round(baseDepth * levelWeight * skewAsk));
@@ -75,6 +95,12 @@ public final class MarketMakerEngine {
 
     /** 市价买单/平空单：优先按卖一（Ask 1）做市商最优报价成交，大单吃穿多档产生真实滑点。 */
     public static long bestExecutionPrice(Quote quote, boolean buying, long quantity) {
+        if (MarketEngine.isV3()) {
+            PriceParams params = StockMarketConfig.priceParams();
+            return buying
+                    ? BookMath.weightedFill(params, quote.price, quote.askPrices, quote.askVolumes, true, quantity)
+                    : BookMath.weightedFill(params, quote.price, quote.bidPrices, quote.bidVolumes, false, quantity);
+        }
         if (buying) {
             long ask1 = quote.askPrices[0] > 0L ? quote.askPrices[0] : quote.price;
             long ask1Vol = Math.max(1L, quote.askVolumes[0]);

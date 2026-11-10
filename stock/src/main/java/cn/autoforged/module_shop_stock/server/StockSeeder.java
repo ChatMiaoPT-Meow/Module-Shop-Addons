@@ -36,16 +36,22 @@ public final class StockSeeder {
             if (!Files.isRegularFile(data)) {
                 return;
             }
-            Path backup = data.resolveSibling("module_shop_stock.dat.pre-2.2.bak");
+            CompoundTag tag = NbtIo.readCompressed(data, NbtAccounter.unlimitedHeap());
+            String format = tag.getString("format");
+            if (StockMarketSavedData.FORMAT.equals(format)) {
+                return;
+            }
+            // zip-2.2 存档升级到 2.3（价格模型 v3 + 波动率口径迁移）；更早的存档沿用 pre-2.2 备份
+            boolean from22 = StockMarketSavedData.FORMAT_2_2.equals(format);
+            Path backup = data.resolveSibling(from22
+                    ? "module_shop_stock.dat.pre-2.3.bak"
+                    : "module_shop_stock.dat.pre-2.2.bak");
             if (Files.exists(backup)) {
                 return;
             }
-            CompoundTag tag = NbtIo.readCompressed(data, NbtAccounter.unlimitedHeap());
-            if (StockMarketSavedData.FORMAT.equals(tag.getString("format"))) {
-                return;
-            }
             Files.copy(data, backup);
-            LOG.info("检测到 2.2 之前的股市存档，已备份为 {}", backup.getFileName());
+            LOG.info("检测到旧版股市存档（format={}），已备份为 {}；加载时会把个股波动迁移到 2.3 的小时口径",
+                    format.isEmpty() ? "无" : format, backup.getFileName());
         } catch (IOException | RuntimeException e) {
             LOG.warn("备份旧股市存档失败：{}", e.getMessage());
         }

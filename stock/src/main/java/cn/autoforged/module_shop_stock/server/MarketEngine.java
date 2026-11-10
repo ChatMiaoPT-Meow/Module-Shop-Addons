@@ -5,6 +5,10 @@ import cn.autoforged.module_shop_stock.data.StockMarketSavedData;
 import cn.autoforged.module_shop_stock.market.Order;
 import cn.autoforged.module_shop_stock.market.Quote;
 import cn.autoforged.module_shop_stock.market.StockDef;
+import cn.autoforged.module_shop_stock.market.model.ImpactModel;
+import cn.autoforged.module_shop_stock.market.model.PriceModelV3;
+import cn.autoforged.module_shop_stock.market.model.PriceParams;
+import cn.autoforged.module_shop_stock.market.model.VolatilityMigration;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.Random;
@@ -46,6 +50,8 @@ public final class MarketEngine {
         int barLimit = StockMarketConfig.BAR_LIMIT.get();
         boolean open = sessionOpen();
 
+        boolean v3 = isV3();
+        PriceParams params = v3 ? StockMarketConfig.priceParams() : null;
         for (StockDef def : data.defs().values()) {
             Quote quote = quoteOf(data, def);
             if (!open || !def.enabled || def.halted) {
@@ -53,7 +59,11 @@ public final class MarketEngine {
                 MarketMakerEngine.rebuildOrderBook(data, def, quote);
                 continue;
             }
-            evolveAndSample(data, def, quote, nowSecond, barSeconds, barLimit);
+            if (v3) {
+                evolveAndSampleV3(params, data, def, quote, nowSecond, barSeconds, barLimit);
+            } else {
+                evolveAndSample(data, def, quote, nowSecond, barSeconds, barLimit);
+            }
         }
 
         TradeService.matchAll(server, data);
@@ -70,7 +80,7 @@ public final class MarketEngine {
     static void evolveAndSample(StockMarketSavedData data, StockDef def, Quote quote, long nowSecond,
             int barSeconds, int barLimit) {
         double mult = StockMarketConfig.VOLATILITY_MULTIPLIER.get();
-        double baseSigma = Math.max(0.004D, def.volatility * mult * 0.55D);
+        double baseSigma = Math.max(0.004D, legacyVolatility(def) * mult * 0.55D);
 
         if (RANDOM.nextDouble() < 0.14D) {
             quote.trend = (RANDOM.nextDouble() - 0.5D) * baseSigma * 0.95D;
@@ -119,8 +129,88 @@ public final class MarketEngine {
         }
     }
 
+    // ------------------------------------------------------------------ 价格模型 v3
+
+    /** 当前是否走 v3 价格模型（priceModelVersion >= 3）。 */
+    public static boolean isV3() {
+        return StockMarketConfig.priceModelVersion() >= 3;
+    }
+
+    /** 个股的 v3 基础小时波动 = 标定波动 x 全局倍率。 */
+    static double sigmaBase(StockDef def) {
+        return Math.max(1e-4D, def.volatility * StockMarketConfig.priceModelVolatilityMultiplier());
+    }
+
+    /** v2 回滚口径：把 2.3 起的小时波动还原成旧的 tick 级波动。 */
+    public static double legacyVolatility(StockDef def) {
+        return def.volatility / VolatilityMigration.FACTOR;
+    }
+
+    static PriceModelV3.Env envOf(PriceParams params, StockDef def, Quote quote, double session) {
+        PriceModelV3.Env env = new PriceModelV3.Env();
+        env.sigmaBase = sigmaBase(def);
+        env.basePrice = def.basePrice;
+        env.depth = def.depth;
+        env.dayRef = quote.prevClose > 0L ? quote.prevClose : quote.dayOpen;
+        env.lower = lowerBound(def, quote);
+        env.upper = upperBound(def, quote);
+        env.session = session;
+        return env;
+    }
+
+    static double sessionFactorNow(PriceParams params) {
+        if (!params.sessionProfileEnabled) {
+            return 1.0D;
+        }
+        LocalTime now = LocalTime.now();
+        return PriceModelV3.sessionFactor(params, now.getHour() * 60 + now.getMinute(),
+                StockMarketConfig.SESSION_OPEN_MINUTE.get(), StockMarketConfig.SESSION_CLOSE_MINUTE.get());
+    }
+
+    static PriceModelV3.State stateOf(Quote quote) {
+        PriceModelV3.State s = new PriceModelV3.State();
+        s.price = Math.abs(quote.exact - quote.price) <= 0.5000001D && quote.exact > 0.0D ? quote.exact : quote.price;
+        s.fair = quote.fairPrice > 0.0D ? quote.fairPrice : s.price;
+        s.sigma = quote.sigma;
+        s.mu = quote.mu;
+        s.newsBoost = quote.newsBoost;
+        return s;
+    }
+
+    static void writeBack(Quote quote, PriceModelV3.State s) {
+        quote.moveToExact(s.price);
+        quote.fairPrice = s.fair;
+        quote.sigma = s.sigma;
+        quote.mu = s.mu;
+        quote.newsBoost = s.newsBoost;
+    }
+
+    static void evolveAndSampleV3(PriceParams params, StockMarketSavedData data, StockDef def, Quote quote,
+            long nowSecond, int barSeconds, int barLimit) {
+        PriceModelV3.Env env = envOf(params, def, quote, sessionFactorNow(params));
+        PriceModelV3.State state = stateOf(quote);
+        PriceModelV3.StepOut out = new PriceModelV3.StepOut();
+        long prev = quote.price;
+        PriceModelV3.step(params, env, state, RANDOM, out);
+        writeBack(quote, state);
+        long next = quote.price;
+
+        long hiBase = Math.max(prev, next);
+        long loBase = Math.min(prev, next);
+        long wickHigh = clamp(def, quote, Math.max(hiBase, Math.round(out.wickHigh)));
+        long wickLow = clamp(def, quote, Math.max(1L, Math.min(loBase, Math.round(out.wickLow))));
+        long simVolume = Math.max(1L, Math.round(out.simVolume));
+
+        quote.sampleWithWick(nowSecond, barSeconds, barLimit, wickHigh, wickLow, simVolume);
+        MarketMakerEngine.rebuildOrderBook(data, def, quote);
+    }
+
     static void applyImpact(StockMarketSavedData data, StockDef def, Quote quote, long quantity, boolean buySide) {
         if (quantity <= 0L) {
+            return;
+        }
+        if (isV3()) {
+            applyImpactV3(data, def, quote, quantity, buySide);
             return;
         }
         double depth = Math.max(1.0D, def.depth);
@@ -128,6 +218,19 @@ public final class MarketEngine {
         long next = Math.round(quote.price * (buySide ? 1.0D + impact : 1.0D - impact));
         quote.moveTo(clamp(def, quote, next));
         quote.trend += (buySide ? 1.0D : -1.0D) * impact * 0.25D;
+        MarketMakerEngine.rebuildOrderBook(data, def, quote);
+    }
+
+    static void applyImpactV3(StockMarketSavedData data, StockDef def, Quote quote, long quantity, boolean buySide) {
+        PriceParams params = StockMarketConfig.priceParams();
+        PriceModelV3.Env env = envOf(params, def, quote, 1.0D);
+        PriceModelV3.State state = stateOf(quote);
+        double sigmaNow = state.sigma > 0.0D ? state.sigma : env.sigmaBase;
+        double impact = ImpactModel.magnitude(params, quantity, def.depth, sigmaNow);
+        double spot = ImpactModel.apply(params, state, impact, buySide, env.sigmaBase);
+        double[] band = PriceModelV3.band(params, env, state.price);
+        state.price = PriceModelV3.clamp(spot, band[0], band[1]);
+        writeBack(quote, state);
         MarketMakerEngine.rebuildOrderBook(data, def, quote);
     }
 
