@@ -7,6 +7,8 @@ public final class Bar {
     public long low;
     public long close;
     public long volume;
+    /** 风格化种子柱（非真实撮合行情）。第一次被真实行情/成交触碰后清除。 */
+    public boolean seeded;
 
     public Bar(long time, long price) {
         this.time = time;
@@ -26,6 +28,7 @@ public final class Bar {
     }
 
     public void touch(long price) {
+        this.seeded = false;
         this.close = Math.max(1L, price);
         if (this.close > this.high) {
             this.high = this.close;

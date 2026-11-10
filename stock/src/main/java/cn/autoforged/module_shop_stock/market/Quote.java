@@ -1,7 +1,8 @@
 package cn.autoforged.module_shop_stock.market;
 
-import java.util.ArrayList;
-import java.util.List;
+import cn.autoforged.module_shop_stock.market.bars.BarAggregator;
+import cn.autoforged.module_shop_stock.market.bars.BarPeriod;
+import cn.autoforged.module_shop_stock.market.bars.BarSeries;
 
 /**
  * 一只股票的运行时行情：价格、趋势动量、波动率聚集度、五档买卖盘口（订单簿）与 K 线柱。
@@ -27,7 +28,9 @@ public final class Quote {
     public final long[] askPrices = new long[BOOK_LEVELS];
     public final long[] askVolumes = new long[BOOK_LEVELS];
 
-    public final List<Bar> bars = new ArrayList<>();
+    /** 六个周期的 K 线容器；{@link #bars} 是其中的 1m 源序列（旧代码按 List&lt;Bar&gt; 使用即可）。 */
+    public final BarAggregator book = new BarAggregator();
+    public final BarSeries bars = this.book.series(BarPeriod.M1);
 
     public Quote(long price) {
         this.price = Math.max(1L, price);
@@ -53,10 +56,7 @@ public final class Quote {
     public void trade(long price, long quantity) {
         long qty = Math.max(0L, quantity);
         this.volume += qty;
-        Bar last = this.bars.isEmpty() ? null : this.bars.get(this.bars.size() - 1);
-        if (last != null) {
-            last.trade(price, qty);
-        }
+        this.book.trade(price, qty);
     }
 
     public void sample(long nowSecond, long barSeconds, int barLimit) {
@@ -65,8 +65,6 @@ public final class Quote {
 
     public void sampleWithWick(long nowSecond, long barSeconds, int barLimit, long wickHigh, long wickLow,
             long simVolume) {
-        long width = Math.max(1L, barSeconds);
-        long start = nowSecond - Math.floorMod(nowSecond, width);
         long hi = Math.max(this.price, wickHigh);
         long lo = Math.max(1L, Math.min(this.price, wickLow));
         if (hi > this.dayHigh) {
@@ -76,23 +74,9 @@ public final class Quote {
             this.dayLow = lo;
         }
         this.volume += Math.max(0L, simVolume);
-        if (this.bars.isEmpty()) {
-            Bar first = new Bar(start, this.prevPrice > 0L ? this.prevPrice : this.price);
-            first.touchWick(hi, lo, this.price, simVolume);
-            this.bars.add(first);
-            return;
-        }
-        Bar last = this.bars.get(this.bars.size() - 1);
-        if (start > last.time) {
-            Bar next = new Bar(start, last.close);
-            next.touchWick(hi, lo, this.price, simVolume);
-            this.bars.add(next);
-            while (this.bars.size() > Math.max(2, barLimit)) {
-                this.bars.remove(0);
-            }
-        } else {
-            last.touchWick(hi, lo, this.price, simVolume);
-        }
+        // barLimit 参数保留以兼容旧调用；各周期上限现由 BarAggregator 的环形缓冲持有（配置同步见 StockMarketConfig.syncBarLimits）
+        this.book.sample(nowSecond, (int) Math.max(1L, barSeconds), this.prevPrice > 0L ? this.prevPrice : this.price,
+                this.price, hi, lo, simVolume);
     }
 
     public void rollDay() {

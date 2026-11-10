@@ -1,5 +1,10 @@
 package cn.autoforged.module_shop_stock;
 
+import cn.autoforged.module_shop_stock.market.Quote;
+import cn.autoforged.module_shop_stock.market.bars.BarPeriod;
+import java.util.Collection;
+import java.util.EnumMap;
+import java.util.Map;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 /** 服务端配置（config/module_shop_stock-server.toml）。 */
@@ -10,6 +15,8 @@ public final class StockMarketConfig {
     public static final ModConfigSpec.IntValue UPDATE_INTERVAL_SECONDS;
     public static final ModConfigSpec.IntValue BAR_SECONDS;
     public static final ModConfigSpec.IntValue BAR_LIMIT;
+    /** 各周期根数配置：barLimit1m / 5m / 15m / 60m / 1d / 1w。 */
+    public static final Map<BarPeriod, ModConfigSpec.IntValue> BAR_LIMITS = new EnumMap<>(BarPeriod.class);
     public static final ModConfigSpec.IntValue MAX_TRADE_QUANTITY;
     public static final ModConfigSpec.LongValue MAX_POSITION;
     public static final ModConfigSpec.LongValue MIN_PRICE;
@@ -41,8 +48,14 @@ public final class StockMarketConfig {
                 .defineInRange("updateIntervalSeconds", 5, 1, 3600);
         BAR_SECONDS = b.comment("K 线周期（秒）")
                 .defineInRange("barSeconds", 60, 10, 3600);
-        BAR_LIMIT = b.comment("每只股票保留的 K 线根数")
-                .defineInRange("barLimit", 240, 20, 600);
+        BAR_LIMIT = b.comment("【已弃用，请改用 barLimit1m】旧的单一 K 线根数。仅当它被改成非默认值(240)且 barLimit1m 仍是默认值时，才映射为 1m 的根数")
+                .defineInRange("barLimit", 240, 20, 2880);
+        for (BarPeriod period : BarPeriod.all()) {
+            BAR_LIMITS.put(period, b.comment("多周期 K 线：" + period.id() + " 周期保留的根数（默认 "
+                    + period.defaultLimit() + "，上限 " + period.maxLimit() + "）。所有周期均由 1m 源周期聚合并各自持久化")
+                    .defineInRange("barLimit" + period.id(), period.defaultLimit(), BarPeriod.MIN_LIMIT,
+                            period.maxLimit()));
+        }
         MAX_TRADE_QUANTITY = b.comment("单次下单最大数量")
                 .defineInRange("maxTradeQuantity", 1000, 1, 100_000);
         MAX_POSITION = b.comment("每只股票每位玩家的最大多仓或空仓数量")
@@ -91,6 +104,27 @@ public final class StockMarketConfig {
     }
 
     private StockMarketConfig() {
+    }
+
+    /** 某周期当前生效的根数；1m 兼容旧键 barLimit。 */
+    public static int barLimit(BarPeriod period) {
+        int value = BAR_LIMITS.get(period).get();
+        if (period == BarPeriod.M1 && value == period.defaultLimit() && BAR_LIMIT.get() != 240) {
+            return Math.max(BarPeriod.MIN_LIMIT, Math.min(period.maxLimit(), BAR_LIMIT.get()));
+        }
+        return value;
+    }
+
+    /** 把配置的各周期根数同步到每只股票的环形缓冲（调小立刻丢头）。每个行情 tick 调用一次，开销可忽略。 */
+    public static void syncBarLimits(Collection<Quote> quotes) {
+        for (Quote quote : quotes) {
+            for (BarPeriod period : BarPeriod.all()) {
+                int limit = barLimit(period);
+                if (quote.book.series(period).limit() != limit) {
+                    quote.book.setLimit(period, limit);
+                }
+            }
+        }
     }
 
     public static long fee(long total) {

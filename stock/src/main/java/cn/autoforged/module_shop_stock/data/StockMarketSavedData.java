@@ -7,6 +7,10 @@ import cn.autoforged.module_shop_stock.market.Order;
 import cn.autoforged.module_shop_stock.market.Position;
 import cn.autoforged.module_shop_stock.market.Quote;
 import cn.autoforged.module_shop_stock.market.StockDef;
+import cn.autoforged.module_shop_stock.market.bars.BarCodec;
+import cn.autoforged.module_shop_stock.market.bars.BarHistorySeeder;
+import cn.autoforged.module_shop_stock.market.bars.BarPeriod;
+import cn.autoforged.module_shop_stock.market.bars.BarSeries;
 import cn.autoforged.module_shop_stock.server.MarketMakerEngine;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -142,6 +146,7 @@ public final class StockMarketSavedData extends SavedData {
             long price = Math.max(min, Math.min(max, def.basePrice));
             quote = new Quote(price);
             seedBars(quote, price, def.volatility, def.symbol.hashCode());
+            finishBars(quote, def, true, true);
             MarketMakerEngine.rebuildOrderBook(this, def, quote);
             this.quotes.put(def.symbol, quote);
             markDirty();
@@ -149,6 +154,78 @@ public final class StockMarketSavedData extends SavedData {
             MarketMakerEngine.rebuildOrderBook(this, def, quote);
         }
         return quote;
+    }
+
+    private static final String KLINE_KEY = "kline";
+
+    /**
+     * 1m 就绪后的收尾：把 1m 聚合回填到空的粗周期，再给日/周补风格化种子（柱上带 seeded）。
+     * {@code markSeeded}：1m 本身就是刚生成的种子；{@code clearCoarse}：丢弃现有粗周期重建（v1 迁移/新生成）。
+     */
+    private static void finishBars(Quote quote, @Nullable StockDef def, boolean markSeeded, boolean clearCoarse) {
+        if (markSeeded) {
+            for (Bar bar : quote.bars) {
+                bar.seeded = true;
+            }
+        }
+        if (clearCoarse) {
+            for (BarPeriod period : BarPeriod.all()) {
+                if (period != BarPeriod.M1) {
+                    quote.book.series(period).clear();
+                }
+            }
+        }
+        quote.book.backfillFromSource();
+        long sum = 0L;
+        for (Bar bar : quote.bars) {
+            sum += bar.volume;
+        }
+        long typical = quote.bars.isEmpty() ? 0L : sum / quote.bars.size() * 1440L;
+        if (typical <= 0L) {
+            typical = def == null ? 100_000L : Math.max(1_000L, def.depth * 100L);
+        }
+        BarHistorySeeder.seedCoarse(quote.book, System.currentTimeMillis() / 1000L, quote.price,
+                def == null ? quote.price : def.basePrice, def == null ? 0.04D : def.volatility, typical,
+                def == null ? 0L : def.symbol.hashCode());
+    }
+
+    private static CompoundTag saveKline(Quote quote) {
+        CompoundTag kline = new CompoundTag();
+        for (BarPeriod period : BarPeriod.all()) {
+            BarSeries series = quote.book.series(period);
+            if (series.isEmpty()) {
+                continue;
+            }
+            BarCodec.Packed packed = BarCodec.pack(series);
+            CompoundTag out = new CompoundTag();
+            out.putLong("t0", packed.t0);
+            out.putIntArray("dt", packed.dt);
+            out.putIntArray("p", packed.ohlc);
+            out.putLongArray("v", packed.vol);
+            if (packed.flags != null) {
+                out.putByteArray("f", packed.flags);
+            }
+            kline.put(period.id(), out);
+        }
+        return kline;
+    }
+
+    private static void loadKline(CompoundTag kline, Quote quote) {
+        for (BarPeriod period : BarPeriod.all()) {
+            if (!kline.contains(period.id(), Tag.TAG_COMPOUND)) {
+                continue;
+            }
+            CompoundTag in = kline.getCompound(period.id());
+            BarCodec.Packed packed = new BarCodec.Packed();
+            packed.t0 = in.getLong("t0");
+            packed.dt = in.getIntArray("dt");
+            packed.ohlc = in.getIntArray("p");
+            packed.vol = in.getLongArray("v");
+            packed.flags = in.contains("f", Tag.TAG_BYTE_ARRAY) ? in.getByteArray("f") : null;
+            BarSeries series = quote.book.series(period);
+            series.clear();
+            BarCodec.unpack(packed, series);
+        }
     }
 
     private static void seedBars(Quote quote, long basePrice, double volatility, long seed) {
@@ -474,19 +551,28 @@ public final class StockMarketSavedData extends SavedData {
             quote.newsBoost = entry.getDouble("newsBoost");
             quote.trend = entry.getDouble("trend");
             quote.volCluster = entry.getDouble("volCluster");
-            ListTag bars = entry.getList("bars", Tag.TAG_COMPOUND);
-            for (int j = 0; j < bars.size(); j++) {
-                CompoundTag barTag = bars.getCompound(j);
-                Bar bar = new Bar(barTag.getLong("t"), Math.max(1L, barTag.getLong("o")));
-                bar.high = Math.max(bar.open, barTag.getLong("h"));
-                bar.low = Math.max(1L, barTag.contains("l") ? barTag.getLong("l") : bar.open);
-                bar.close = Math.max(1L, barTag.getLong("c"));
-                bar.volume = Math.max(0L, barTag.getLong("v"));
-                quote.bars.add(bar);
+            StockDef def = this.defs.get(symbol);
+            boolean hasKline = entry.contains(KLINE_KEY, Tag.TAG_COMPOUND);
+            if (hasKline) {
+                loadKline(entry.getCompound(KLINE_KEY), quote);
+            } else {
+                // 2.2 及更早：单一 bars 列表，视为 1m；粗周期稍后从 1m 回填
+                ListTag bars = entry.getList("bars", Tag.TAG_COMPOUND);
+                for (int j = 0; j < bars.size(); j++) {
+                    CompoundTag barTag = bars.getCompound(j);
+                    Bar bar = new Bar(barTag.getLong("t"), Math.max(1L, barTag.getLong("o")));
+                    bar.high = Math.max(bar.open, barTag.getLong("h"));
+                    bar.low = Math.max(1L, barTag.contains("l") ? barTag.getLong("l") : bar.open);
+                    bar.close = Math.max(1L, barTag.getLong("c"));
+                    bar.volume = Math.max(0L, barTag.getLong("v"));
+                    quote.bars.add(bar);
+                }
             }
             if (quote.bars.isEmpty()) {
-                StockDef def = this.defs.get(symbol);
                 seedBars(quote, quote.price, def == null ? 0.04D : def.volatility, symbol.hashCode());
+                finishBars(quote, def, true, !hasKline);
+            } else if (!hasKline) {
+                finishBars(quote, def, false, true);
             }
             this.quotes.put(symbol, quote);
         }
@@ -616,6 +702,7 @@ public final class StockMarketSavedData extends SavedData {
                     bar.close = price;
                     quote.bars.add(bar);
                 }
+                finishBars(quote, def, false, true);
             }
         }
     }
@@ -626,6 +713,7 @@ public final class StockMarketSavedData extends SavedData {
             if (quote == null) {
                 quote = new Quote(def.basePrice);
                 seedBars(quote, quote.price, def.volatility, def.symbol.hashCode());
+                finishBars(quote, def, true, true);
                 this.quotes.put(def.symbol, quote);
             }
             MarketMakerEngine.rebuildOrderBook(this, def, quote);
@@ -742,18 +830,7 @@ public final class StockMarketSavedData extends SavedData {
             out.putDouble("newsBoost", quote.newsBoost);
             out.putDouble("trend", quote.trend);
             out.putDouble("volCluster", quote.volCluster);
-            ListTag bars = new ListTag();
-            for (Bar bar : quote.bars) {
-                CompoundTag barTag = new CompoundTag();
-                barTag.putLong("t", bar.time);
-                barTag.putLong("o", bar.open);
-                barTag.putLong("h", bar.high);
-                barTag.putLong("l", bar.low);
-                barTag.putLong("c", bar.close);
-                barTag.putLong("v", bar.volume);
-                bars.add(barTag);
-            }
-            out.put("bars", bars);
+            out.put(KLINE_KEY, saveKline(quote));
             quoteList.add(out);
         }
         tag.put("quotes", quoteList);
