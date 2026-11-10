@@ -11,6 +11,7 @@ import cn.autoforged.module_shop.client.ui.widget.ScrollController;
 import cn.autoforged.module_shop.client.ui.widget.SkiaTextField;
 import cn.autoforged.module_shop_stock.client.ChartRenderer;
 import cn.autoforged.module_shop_stock.client.StockMarketState;
+import cn.autoforged.module_shop_stock.market.bars.BarPeriod;
 import io.github.humbleui.skija.Canvas;
 import java.util.List;
 import net.minecraft.network.chat.Component;
@@ -34,6 +35,9 @@ public final class QuoteView implements StockView {
     private static final float CHART_Y = 45.0F;
     private static final float INFO_Y = 115.0F;
     private static final float FORM_Y = 122.0F;
+    private static final float CHIP_H = 10.0F;
+    private static final float CHIP_PAD = 2.5F;
+    private static final float CHIP_GAP = 1.0F;
 
     private final ScrollController scroll = new ScrollController();
     private final Button kind;
@@ -281,11 +285,16 @@ public final class QuoteView implements StockView {
             return;
         }
 
-        // 第一行：股票名称 + 代码与行业标签
-        Text.drawLine(canvas, def.label(), ShopTheme.bold(), Text.BODY, ShopTheme.text(),
-                x, y + NAME_Y, w * 0.62F, Text.Align.LEFT);
-        Text.drawLine(canvas, def.symbol + " · " + def.sector, ShopTheme.regular(), Text.SMALL, ShopTheme.text3(),
-                x + w * 0.56F, y + NAME_Y, w * 0.44F, Text.Align.RIGHT);
+        // 第一行：股票名称 + 代码（左）；K 线周期切换芯片（右，1分/5分/15分/1时/日/周）
+        float chipsW = periodChipsWidth();
+        float nameW = Math.max(20.0F, w - chipsW - 4.0F);
+        float labelW = Text.drawLine(canvas, def.label(), ShopTheme.bold(), Text.BODY, ShopTheme.text(),
+                x, y + NAME_Y, nameW, Text.Align.LEFT);
+        if (nameW - labelW > 24.0F) {
+            Text.drawLine(canvas, def.symbol, ShopTheme.regular(), Text.SMALL, ShopTheme.text3(),
+                    x + labelW + 3.0F, y + NAME_Y, nameW - labelW - 3.0F, Text.Align.LEFT);
+        }
+        renderPeriodChips(canvas, f, x + w - chipsW, y + NAME_Y - CHIP_H / 2.0F);
 
         // 第二行：大号现价 + 涨跌幅 + 高低价摘要（取消了 5m/15m 按钮，空间留给盘面与订单簿）
         long bps = quote.changeBps();
@@ -307,7 +316,7 @@ public final class QuoteView implements StockView {
         Draw.fill(canvas, x, y + CHART_Y, w, chartH, 3.0F, Draw.alpha(ShopTheme.card(), 0.45F));
         Draw.stroke(canvas, x, y + CHART_Y, w, chartH, 3.0F, 1.0F,
                 hoverChart ? Draw.alpha(ShopTheme.border(), 0.75F) : Draw.alpha(ShopTheme.borderDim(), 0.9F));
-        if (StockMarketState.chart.symbol.equals(def.symbol)) {
+        if (StockMarketState.chartReady(def.symbol)) {
             ChartRenderer.draw(canvas, StockMarketState.chart, x + 3.0F, y + CHART_Y + 3.0F,
                     w - 6.0F, chartH - 6.0F, f.mouseX(), f.mouseY());
         } else {
@@ -483,11 +492,12 @@ public final class QuoteView implements StockView {
         this.coverShort.render(canvas, f.mouseX(), f.mouseY(), f.dtMs());
     }
 
+    /** 全量重拉：换股/换周期尽快（服务端对换股不节流），平时每 15 秒一次兜底，实时更新靠行情广播里的增量柱。 */
     private void updateChart(String symbol) {
         long now = System.currentTimeMillis();
-        boolean stale = !symbol.equals(StockMarketState.chart.symbol);
-        boolean expired = now - this.chartAt > 5_000L;
-        if ((stale && now - this.chartAt > 800L) || (!stale && expired)) {
+        boolean stale = !StockMarketState.chartReady(symbol);
+        boolean expired = now - this.chartAt > 15_000L;
+        if ((stale && now - this.chartAt > 250L) || (!stale && expired)) {
             this.chartAt = now;
             StockMarketState.requestChart(symbol);
         }
@@ -516,6 +526,65 @@ public final class QuoteView implements StockView {
         for (Button b : buttons()) {
             b.visible(false);
         }
+    }
+
+    private static String periodLabel(BarPeriod period) {
+        return label("gui.stock.period." + period.id());
+    }
+
+    private static float chipWidth(BarPeriod period) {
+        return Text.width(periodLabel(period), ShopTheme.regular(), Text.SMALL) + CHIP_PAD * 2.0F;
+    }
+
+    private static float periodChipsWidth() {
+        float total = 0.0F;
+        BarPeriod[] periods = BarPeriod.all();
+        for (BarPeriod period : periods) {
+            total += chipWidth(period);
+        }
+        return total + CHIP_GAP * (periods.length - 1);
+    }
+
+    private void renderPeriodChips(Canvas canvas, AddonFrame f, float x, float y) {
+        float cursor = x;
+        boolean locked = StockMarketState.legacyServer;
+        for (BarPeriod period : BarPeriod.all()) {
+            float cw = chipWidth(period);
+            boolean selected = StockMarketState.period == period;
+            boolean hover = !locked && f.mouseX() >= cursor && f.mouseX() < cursor + cw
+                    && f.mouseY() >= y && f.mouseY() < y + CHIP_H;
+            if (selected) {
+                Draw.fill(canvas, cursor, y, cw, CHIP_H, 2.0F, ShopTheme.accentTint());
+            } else if (hover) {
+                Draw.fill(canvas, cursor, y, cw, CHIP_H, 2.0F, ShopTheme.rowHover());
+            }
+            Text.drawLine(canvas, periodLabel(period), selected ? ShopTheme.bold() : ShopTheme.regular(), Text.SMALL,
+                    selected ? ShopTheme.accent() : locked ? ShopTheme.text3() : ShopTheme.text2(),
+                    cursor, y + CHIP_H / 2.0F, cw, Text.Align.CENTER);
+            cursor += cw + CHIP_GAP;
+        }
+    }
+
+    private boolean clickPeriodChips(AddonFrame f, double mouseX, double mouseY) {
+        float x = centerPaneX(f);
+        float w = centerPaneW(f);
+        float y = f.y() + 2.0F + NAME_Y - CHIP_H / 2.0F;
+        if (mouseY < y || mouseY >= y + CHIP_H) {
+            return false;
+        }
+        float cursor = x + w - periodChipsWidth();
+        for (BarPeriod period : BarPeriod.all()) {
+            float cw = chipWidth(period);
+            if (mouseX >= cursor && mouseX < cursor + cw) {
+                if (!StockMarketState.legacyServer && period != StockMarketState.period) {
+                    StockMarketState.setPeriod(period);
+                    this.chartAt = 0L;
+                }
+                return true;
+            }
+            cursor += cw + CHIP_GAP;
+        }
+        return false;
     }
 
     private float centerPaneX(AddonFrame f) {
@@ -556,6 +625,9 @@ public final class QuoteView implements StockView {
             return true;
         }
         if (clickOrderBook(f, mouseX, mouseY)) {
+            return true;
+        }
+        if (clickPeriodChips(f, mouseX, mouseY)) {
             return true;
         }
         if (insideChart(f, mouseX, mouseY)) {

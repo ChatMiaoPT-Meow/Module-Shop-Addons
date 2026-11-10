@@ -1,6 +1,9 @@
 package cn.autoforged.module_shop_stock.client;
 
+import cn.autoforged.module_shop_stock.market.bars.BarPeriod;
 import cn.autoforged.module_shop_stock.network.StockMarketNetwork;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -17,6 +20,8 @@ import net.minecraft.network.chat.Component;
 /** 客户端缓存：24+ 股票定义、五档买卖盘口、多空双向持仓、委托、自动快讯与 K 线滚轮缩放状态。 */
 public final class StockMarketState {
     public static final int DEFAULT_ZOOM_BARS = 32;
+    /** 日/周周期的默认可见根数。 */
+    public static final int DEFAULT_CALENDAR_ZOOM_BARS = 60;
     public static final int MIN_ZOOM_BARS = 8;
     public static final int MAX_ZOOM_BARS = 120;
     public static final int BOOK_LEVELS = 5;
@@ -134,16 +139,82 @@ public final class StockMarketState {
 
     public static final class Chart {
         public String symbol = "";
+        public BarPeriod period = BarPeriod.M1;
         public int barSeconds = 60;
+        /** 服务端本地时区；旧服务端不发偏移，则按客户端系统时区显示。 */
+        public ZoneId zone = ZoneId.systemDefault();
+        /** 服务端为该周期保留的根数上限，增量追加时据此裁剪头部。 */
+        public int limit = Integer.MAX_VALUE;
         public long[] time = new long[0];
         public long[] open = new long[0];
         public long[] high = new long[0];
         public long[] low = new long[0];
         public long[] close = new long[0];
         public long[] volume = new long[0];
+        /** 风格化种子柱标记（非真实行情），与 time 等长。 */
+        public boolean[] seeded = new boolean[0];
 
         public boolean isEmpty() {
             return this.time.length == 0;
+        }
+
+        public boolean anySeeded(int from, int to) {
+            for (int i = Math.max(0, from); i < Math.min(to, this.seeded.length); i++) {
+                if (this.seeded[i]) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /**
+         * 合并行情广播附带的最近若干根柱：时间相同的覆盖，更晚的追加（超出 limit 丢最老的）。
+         * 返回追加的根数。
+         */
+        public int mergeDelta(long[] t, long[] o, long[] h, long[] l, long[] c, long[] v, byte[] sd) {
+            int n = Math.min(t.length, Math.min(o.length, Math.min(h.length, Math.min(l.length,
+                    Math.min(c.length, v.length)))));
+            int appended = 0;
+            for (int k = 0; k < n; k++) {
+                int len = this.time.length;
+                boolean flag = sd != null && k < sd.length && sd[k] != 0;
+                int at = -1;
+                for (int i = len - 1; i >= Math.max(0, len - 4); i--) {
+                    if (this.time[i] == t[k]) {
+                        at = i;
+                        break;
+                    }
+                }
+                if (at >= 0) {
+                    this.open[at] = o[k];
+                    this.high[at] = h[k];
+                    this.low[at] = l[k];
+                    this.close[at] = c[k];
+                    this.volume[at] = v[k];
+                    this.seeded[at] = flag;
+                } else if (len == 0 || t[k] > this.time[len - 1]) {
+                    int drop = len >= this.limit ? len - this.limit + 1 : 0;
+                    this.time = append(this.time, drop, t[k]);
+                    this.open = append(this.open, drop, o[k]);
+                    this.high = append(this.high, drop, h[k]);
+                    this.low = append(this.low, drop, l[k]);
+                    this.close = append(this.close, drop, c[k]);
+                    this.volume = append(this.volume, drop, v[k]);
+                    boolean[] grown = new boolean[len - drop + 1];
+                    System.arraycopy(this.seeded, drop, grown, 0, len - drop);
+                    grown[len - drop] = flag;
+                    this.seeded = grown;
+                    appended++;
+                }
+            }
+            return appended;
+        }
+
+        private static long[] append(long[] src, int drop, long value) {
+            long[] out = new long[src.length - drop + 1];
+            System.arraycopy(src, drop, out, 0, src.length - drop);
+            out[out.length - 1] = value;
+            return out;
         }
     }
 
@@ -157,6 +228,10 @@ public final class StockMarketState {
     private static final List<AuditRow> AUDIT = new ArrayList<>();
 
     public static Chart chart = new Chart();
+    /** 当前选中的 K 线周期（客户端偏好，切换时立即重新拉图）。 */
+    public static BarPeriod period = BarPeriod.M1;
+    /** 服务端的 chart 回包不带 period（2.3 之前的服务端）：只有 1m，周期切换不可用。 */
+    public static boolean legacyServer;
 
     public static String selected = "";
     public static String query = "";
@@ -236,6 +311,8 @@ public final class StockMarketState {
         ADMIN_STOCKS.clear();
         AUDIT.clear();
         chart = new Chart();
+        period = BarPeriod.M1;
+        legacyServer = false;
         selected = "";
         quantity = "1";
         limitPrice = "";
@@ -273,6 +350,23 @@ public final class StockMarketState {
             next += wheelAmount > 0.0D ? -2 : 2;
         }
         targetZoomBars = Math.max(MIN_ZOOM_BARS, Math.min(MAX_ZOOM_BARS, next));
+    }
+
+    /** 切换 K 线周期：回到最新、缩放重置为该周期默认值（分钟 32 根，日/周 60 根）；图表数据留待服务端按新周期重发。 */
+    public static void setPeriod(BarPeriod next) {
+        if (next == null || next == period || legacyServer) {
+            return;
+        }
+        period = next;
+        int zoom = next.isCalendar() ? DEFAULT_CALENDAR_ZOOM_BARS : DEFAULT_ZOOM_BARS;
+        targetZoomBars = zoom;
+        zoomBars = zoom;
+        panBars = 0;
+    }
+
+    /** 当前图表是否就是所选股票 + 所选周期（旧服务端不回 period，视为 1m）。 */
+    public static boolean chartReady(String symbol) {
+        return chart.symbol.equals(symbol) && chart.period == period;
     }
 
     public static void resetZoom() {
@@ -455,6 +549,7 @@ public final class StockMarketState {
         CompoundTag tag = new CompoundTag();
         tag.putString("type", "chart");
         tag.putString("symbol", symbol);
+        tag.putString("period", period.id());
         StockMarketNetwork.sendToServer(tag);
     }
 
@@ -725,8 +820,50 @@ public final class StockMarketState {
                 quote.prevClose = quote.previous;
             }
         }
+        if (tag.contains("cd", Tag.TAG_COMPOUND)) {
+            applyChartDelta(tag.getCompound("cd"));
+        }
         if (def(selected) == null) {
             selected = DEFS.isEmpty() ? "" : DEFS.get(0).symbol;
+        }
+    }
+
+    private static ZoneId zoneOf(CompoundTag tag) {
+        if (!tag.contains("tz")) {
+            return ZoneId.systemDefault();
+        }
+        try {
+            return ZoneOffset.ofTotalSeconds(Math.max(-64_800, Math.min(64_800, tag.getInt("tz"))));
+        } catch (RuntimeException ex) {
+            return ZoneId.systemDefault();
+        }
+    }
+
+    private static boolean[] seededOf(CompoundTag tag, int n) {
+        boolean[] out = new boolean[n];
+        if (tag.contains("sd")) {
+            byte[] flags = tag.getByteArray("sd");
+            for (int i = 0; i < n && i < flags.length; i++) {
+                out[i] = flags[i] != 0;
+            }
+        }
+        return out;
+    }
+
+    /** 行情广播附带的当前看图周期最近柱：只在 symbol + period 与已加载图表一致时合并。 */
+    private static void applyChartDelta(CompoundTag delta) {
+        if (!delta.getString("symbol").equals(chart.symbol)
+                || BarPeriod.parse(delta.getString("period")) != chart.period || chart.isEmpty()) {
+            return;
+        }
+        if (delta.contains("limit")) {
+            chart.limit = Math.max(2, delta.getInt("limit"));
+        }
+        int appended = chart.mergeDelta(delta.getLongArray("t"), delta.getLongArray("o"), delta.getLongArray("h"),
+                delta.getLongArray("l"), delta.getLongArray("c"), delta.getLongArray("v"),
+                delta.contains("sd") ? delta.getByteArray("sd") : null);
+        if (appended > 0 && panBars > 0) {
+            panBars += appended; // 正在回看历史时，新柱不把视野顶走
         }
     }
 
@@ -741,13 +878,34 @@ public final class StockMarketState {
     private static void applyChart(CompoundTag tag) {
         Chart next = new Chart();
         next.symbol = tag.getString("symbol");
+        legacyServer = !tag.contains("period");
+        next.period = BarPeriod.parse(tag.getString("period"));
+        if (legacyServer) {
+            period = BarPeriod.M1;
+        }
         next.barSeconds = Math.max(1, tag.getInt("barSeconds"));
-        next.time = tag.getLongArray("t");
-        next.open = tag.getLongArray("o");
-        next.high = tag.getLongArray("h");
-        next.low = tag.getLongArray("l");
-        next.close = tag.getLongArray("c");
-        next.volume = tag.getLongArray("v");
+        if (tag.contains("limit")) {
+            next.limit = Math.max(2, tag.getInt("limit"));
+        }
+        next.zone = zoneOf(tag);
+        long[] time = tag.getLongArray("t");
+        long[] open = tag.getLongArray("o");
+        long[] high = tag.getLongArray("h");
+        long[] low = tag.getLongArray("l");
+        long[] close = tag.getLongArray("c");
+        long[] volume = tag.getLongArray("v");
+        int n = Math.min(time.length, Math.min(open.length, Math.min(high.length, Math.min(low.length,
+                Math.min(close.length, volume.length)))));
+        next.time = java.util.Arrays.copyOf(time, n);
+        next.open = java.util.Arrays.copyOf(open, n);
+        next.high = java.util.Arrays.copyOf(high, n);
+        next.low = java.util.Arrays.copyOf(low, n);
+        next.close = java.util.Arrays.copyOf(close, n);
+        next.volume = java.util.Arrays.copyOf(volume, n);
+        next.seeded = seededOf(tag, n);
+        if (!next.symbol.equals(chart.symbol) || next.period != chart.period) {
+            panBars = 0;
+        }
         chart = next;
         Quote q = QUOTES.get(next.symbol);
         if (q != null && tag.contains("bp")) {
