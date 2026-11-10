@@ -64,8 +64,40 @@ dependencies {
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 }
 
+// ---- 纯 Java 单测 / 模拟的运行环境 ----
+// Windows 上 Gradle 用 @argfile 把类路径交给测试 JVM，而 JVM 读 argfile 用的是系统编码；
+// 项目路径含中文时类路径会乱码，表现为 "Could not execute test class ... ClassNotFoundException"。
+// 所以把编译产物复制到纯 ASCII 的临时目录再运行；路径本身就是纯 ASCII 时不做任何事。
+def pathIsAscii = { String s -> s.chars().allMatch { it < 128 } }
+def stageRoot = new File(System.getProperty('java.io.tmpdir'), 'module_shop_stock_test_cp')
+def needStage = !pathIsAscii(projectDir.path)
+
+tasks.register("stageTestClasses", Sync) {
+    onlyIf { needStage }
+    dependsOn tasks.named('testClasses')
+    from(sourceSets.test.output.classesDirs) { into 'test' }
+    from(sourceSets.test.output.resourcesDir ?: files()) { into 'test-res' }
+    from(sourceSets.main.output.classesDirs) { into 'main' }
+    from(sourceSets.main.output.resourcesDir ?: files()) { into 'main-res' }
+    into stageRoot
+}
+
+def testRunClasspath = {
+    if (!needStage) {
+        return sourceSets.test.runtimeClasspath
+    }
+    def keep = sourceSets.test.runtimeClasspath.filter { f -> pathIsAscii(f.path) }
+    return files(new File(stageRoot, 'test'), new File(stageRoot, 'test-res'),
+            new File(stageRoot, 'main'), new File(stageRoot, 'main-res')) + keep
+}
+
 tasks.named("test") {
     useJUnitPlatform()
+    if (needStage) {
+        dependsOn tasks.named('stageTestClasses')
+        testClassesDirs = files(new File(stageRoot, 'test'))
+    }
+    classpath = testRunClasspath()
     testLogging { events "passed", "failed", "skipped"; showStandardStreams = true }
 }
 
@@ -73,7 +105,10 @@ tasks.named("test") {
 tasks.register("simulatePriceModel", JavaExec) {
     group = "verification"
     description = "运行价格模型 v3 统计模拟并打印验收表"
-    classpath = sourceSets.test.runtimeClasspath
+    if (needStage) {
+        dependsOn tasks.named('stageTestClasses')
+    }
+    classpath = testRunClasspath()
     mainClass = "cn.autoforged.module_shop_stock.market.model.PriceModelSim"
     args = [(project.findProperty("simPaths") ?: "200").toString()]
     jvmArgs "-Dstdout.encoding=UTF-8", "-Dfile.encoding=UTF-8"

@@ -135,7 +135,8 @@ public final class PriceModelV3 {
         sg += p.kappaSigmaPerHour * (target - sg) * dtH + p.xiSigma * sg * rng.nextGaussian() * sq;
         double absRet = Math.abs(s.lastRet);
         if (absRet > p.realizedThreshold * target * sq) {
-            sg += p.realizedBump * (absRet / sq - target);
+            // realizedBump 以 5 秒 tick 为基准，按 dt 折算，保证改 updateIntervalSeconds 后统计性质不变
+            sg += p.realizedBump * (p.dtSec / 5.0D) * (absRet / sq - target);
         }
         sg = clamp(sg, p.sigmaMinRatio * target, p.sigmaMaxRatio * target);
         s.sigma = sg;

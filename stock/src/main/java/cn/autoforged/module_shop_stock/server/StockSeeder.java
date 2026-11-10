@@ -87,7 +87,7 @@ public final class StockSeeder {
                 String name = string(object, "name", symbol);
                 String sector = string(object, "sector", "");
                 long base = clampLong(object, "base", 100L, 1L, 1_000_000L);
-                double vol = clampDouble(object, "vol", 0.045D, 0.002D, 0.35D);
+                double vol = clampDouble(object, "vol", 0.022D, 0.002D, 0.35D);
                 long depth = object.has("depth") || !object.has("float")
                         ? clampLong(object, "depth", 3_500L, 100L, 1_000_000L)
                         : Math.max(100L, clampLong(object, "float", 700_000L, 20_000L, 200_000_000L) / 200L);

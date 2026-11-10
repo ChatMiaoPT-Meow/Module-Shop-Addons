@@ -81,7 +81,7 @@
   "gui.stock.no_board": "还没有人持仓",
   "gui.stock.admin_columns": "代码 · 名称 · 持仓 / 现价",
   "gui.stock.admin_form_hint": "代码 2–8 位大写字母或数字；小时波动 0.002–0.35（推荐 0.01–0.04）；深度 100–1000000",
-  "gui.stock.admin_news_hint": "涨跌 % 取 -30 到 30；发布后立即跳空并刷新做市商盘口（内置 120 条自动新闻）",
+  "gui.stock.admin_news_hint": "涨跌 % 取 -30 到 30；发布后先调整公允价、现价跟进一部分并刷新做市商盘口（内置 120 条自动新闻）",
   "gui.stock.no_audit": "还没有管理操作",
   "msg.stock.closed": "股市当前已暂停交易",
   "msg.stock.session_closed": "当前不在交易时段",
