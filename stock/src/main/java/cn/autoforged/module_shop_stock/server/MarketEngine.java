@@ -44,6 +44,7 @@ public final class MarketEngine {
 
         StockMarketSavedData data = StockMarketSavedData.get(server);
         rollDayIfNeeded(data);
+        StockMarketConfig.syncBarLimits(data.quotes().values());
 
         long nowSecond = now / 1000L;
         int barSeconds = StockMarketConfig.BAR_SECONDS.get();

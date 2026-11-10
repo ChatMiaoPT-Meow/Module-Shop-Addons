@@ -4,7 +4,6 @@ import cn.autoforged.module_shop.api.ModuleShopApi;
 import cn.autoforged.module_shop.api.view.BalanceView;
 import cn.autoforged.module_shop_stock.StockMarketConfig;
 import cn.autoforged.module_shop_stock.data.StockMarketSavedData;
-import cn.autoforged.module_shop_stock.market.Bar;
 import cn.autoforged.module_shop_stock.market.Order;
 import cn.autoforged.module_shop_stock.market.Position;
 import cn.autoforged.module_shop_stock.market.Quote;
@@ -28,7 +27,6 @@ import net.minecraft.server.level.ServerPlayer;
 public final class StockServer {
     private static final Map<UUID, Long> SUBSCRIBERS = new LinkedHashMap<>();
     private static final Map<UUID, Long> LAST_SNAPSHOT = new LinkedHashMap<>();
-    private static final Map<UUID, Long> LAST_CHART = new LinkedHashMap<>();
     private static final long SUBSCRIBE_TTL_MS = 90_000L;
 
     private StockServer() {
@@ -58,9 +56,7 @@ public final class StockServer {
                 }
             }
             case "chart" -> {
-                if (!throttled(LAST_CHART, player.getUUID(), 400L)) {
-                    sendChart(player, data, tag.getString("symbol"));
-                }
+                ChartService.handle(player, data, tag);
             }
             case "trade" -> trade(player, data, tag);
             case "cancel" -> {
@@ -160,7 +156,9 @@ public final class StockServer {
         template.put("quotes", quotesTag(data, true));
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             if (SUBSCRIBERS.containsKey(player.getUUID())) {
-                StockMarketNetwork.sendToPlayer(player, template.copy());
+                CompoundTag message = template.copy();
+                ChartService.attachDelta(message, player.getUUID(), data);
+                StockMarketNetwork.sendToPlayer(player, message);
             }
         }
     }
@@ -178,45 +176,7 @@ public final class StockServer {
 
     public static void clearSubscribers() {
         SUBSCRIBERS.clear();
-    }
-
-    private static void sendChart(ServerPlayer player, StockMarketSavedData data, String symbol) {
-        StockDef def = data.def(symbol);
-        if (def == null) {
-            return;
-        }
-        Quote quote = MarketEngine.quoteOf(data, def);
-        int size = quote.bars.size();
-        long[] time = new long[size];
-        long[] open = new long[size];
-        long[] high = new long[size];
-        long[] low = new long[size];
-        long[] close = new long[size];
-        long[] volume = new long[size];
-        for (int i = 0; i < size; i++) {
-            Bar bar = quote.bars.get(i);
-            time[i] = bar.time;
-            open[i] = bar.open;
-            high[i] = bar.high;
-            low[i] = bar.low;
-            close[i] = bar.close;
-            volume[i] = bar.volume;
-        }
-        CompoundTag out = new CompoundTag();
-        out.putString("type", "chart");
-        out.putString("symbol", symbol);
-        out.putInt("barSeconds", StockMarketConfig.BAR_SECONDS.get());
-        out.putLongArray("t", time);
-        out.putLongArray("o", open);
-        out.putLongArray("h", high);
-        out.putLongArray("l", low);
-        out.putLongArray("c", close);
-        out.putLongArray("v", volume);
-        out.putLongArray("bp", quote.bidPrices);
-        out.putLongArray("bv", quote.bidVolumes);
-        out.putLongArray("ap", quote.askPrices);
-        out.putLongArray("av", quote.askVolumes);
-        StockMarketNetwork.sendToPlayer(player, out);
+        ChartService.clear();
     }
 
     private static void sendBoard(ServerPlayer player, StockMarketSavedData data, MinecraftServer server) {

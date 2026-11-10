@@ -5,19 +5,22 @@ import cn.autoforged.module_shop.client.ui.render.Draw;
 import cn.autoforged.module_shop.client.ui.render.Text;
 import io.github.humbleui.skija.Canvas;
 import java.time.Instant;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import net.minecraft.network.chat.Component;
 
 /**
- * K 线 + 均线（MA5 / MA15）+ 成交量 + 鼠标滚轮无级缩放与十字光标浮层。涨红跌绿。
+ * K 线 + 均线（MA5 / MA10 / MA20，客户端按收盘价现算）+ 成交量 + 鼠标滚轮无级缩放与十字光标浮层。涨红跌绿。
+ * 时间轴随周期切换：分钟/小时周期显示 HH:mm，日/周显示月-日（均按服务端时区）；风格化种子柱淡显并标「模拟」。
  */
 public final class ChartRenderer {
     private static final float AXIS_W = 22.0F;
     private static final float VOLUME_H = 9.0F;
     private static final float TIME_H = 10.0F;
-    private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm")
-            .withZone(ZoneId.systemDefault());
+    private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm");
+    private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("MM-dd");
+    private static final DateTimeFormatter DATE_CLOCK = DateTimeFormatter.ofPattern("MM-dd HH:mm");
+    private static final float SEEDED_ALPHA = 0.38F;
 
     private ChartRenderer() {
     }
@@ -87,7 +90,11 @@ public final class ChartRenderer {
             int slotIndex = i - first;
             float cx = x + slot * slotIndex + slot / 2.0F;
             boolean up = ac[i] >= ao[i];
+            boolean fake = i < chart.seeded.length && chart.seeded[i];
             int color = up ? ShopTheme.red() : ShopTheme.green();
+            if (fake) {
+                color = Draw.alpha(color, SEEDED_ALPHA);
+            }
             float yHigh = map(ah[i], min, max, top, priceH);
             float yLow = map(al[i], min, max, top, priceH);
             float yOpen = map(ao[i], min, max, top, priceH);
@@ -106,8 +113,10 @@ public final class ChartRenderer {
 
         drawMovingAverage(canvas, ac, first, end, 5, min, max, x, top, priceH, slot,
                 Draw.alpha(ShopTheme.gold(), 0.82F));
-        drawMovingAverage(canvas, ac, first, end, 15, min, max, x, top, priceH, slot,
+        drawMovingAverage(canvas, ac, first, end, 10, min, max, x, top, priceH, slot,
                 Draw.alpha(ShopTheme.accent(), 0.78F));
+        drawMovingAverage(canvas, ac, first, end, 20, min, max, x, top, priceH, slot,
+                Draw.alpha(ShopTheme.text2(), 0.80F));
 
         long last = ac[end - 1];
         float lastY = map(last, min, max, top, priceH);
@@ -127,9 +136,13 @@ public final class ChartRenderer {
                     x + plotW, top + priceH - 4.0F, axisW, Text.Align.RIGHT);
         }
 
-        Text.drawLine(canvas, clock(at[first]), ShopTheme.regular(), 6.5F, ShopTheme.text3(),
+        // 分钟/小时周期跨日时，两端标签带上日期
+        boolean multiDay = !chart.period.isCalendar()
+                && !Instant.ofEpochSecond(at[first]).atZone(chart.zone).toLocalDate()
+                        .equals(Instant.ofEpochSecond(at[end - 1]).atZone(chart.zone).toLocalDate());
+        Text.drawLine(canvas, axisTime(chart, at[first], multiDay), ShopTheme.regular(), 6.5F, ShopTheme.text3(),
                 x, timeTop + TIME_H / 2.0F, plotW - 2.0F, Text.Align.LEFT);
-        Text.drawLine(canvas, clock(at[end - 1]), ShopTheme.regular(), 6.5F, ShopTheme.text3(),
+        Text.drawLine(canvas, axisTime(chart, at[end - 1], multiDay), ShopTheme.regular(), 6.5F, ShopTheme.text3(),
                 x, timeTop + TIME_H / 2.0F, plotW - 2.0F, Text.Align.RIGHT);
 
         boolean hoverChart = mouseX >= x && mouseX <= x + plotW && mouseY >= top && mouseY <= volumeTop + VOLUME_H;
@@ -141,6 +154,15 @@ public final class ChartRenderer {
                 hoverChart ? ShopTheme.accent() : ShopTheme.text2(),
                 x + 4.0F, top + 6.0F, badgeW, Text.Align.LEFT);
 
+        if (chart.anySeeded(first, end)) {
+            String tag = Component.translatable("gui.stock.chart_seeded").getString();
+            float tagW = Text.width(tag, ShopTheme.regular(), 6.5F) + 5.0F;
+            Draw.fill(canvas, x + plotW - tagW - 1.5F, top + 1.5F, tagW, 9.0F, 2.0F,
+                    Draw.alpha(ShopTheme.card(), 0.82F));
+            Text.drawLine(canvas, tag, ShopTheme.regular(), 6.5F, ShopTheme.gold(),
+                    x + plotW - tagW + 1.0F, top + 6.0F, tagW, Text.Align.LEFT);
+        }
+
         if (hoverChart) {
             int slotIndex = (int) ((mouseX - x) / slot);
             slotIndex = Math.max(0, Math.min(bars - 1, slotIndex));
@@ -150,11 +172,11 @@ public final class ChartRenderer {
             float my = Math.max(top, Math.min(top + priceH, (float) mouseY));
             Draw.line(canvas, x, my, x + plotW, my, 0.7F, Draw.alpha(ShopTheme.text2(), 0.45F));
 
-            String ohlc = String.format(Locale.ROOT, "高%d 低%d 收%d", ah[bar], al[bar], ac[bar]);
+            String ohlc = Component.translatable("gui.stock.chart_ohlc", ah[bar], al[bar], ac[bar]).getString();
             Text.drawLine(canvas, ohlc, ShopTheme.regular(), 6.5F,
                     ac[bar] >= ao[bar] ? ShopTheme.red() : ShopTheme.green(),
                     x + badgeW + 3.5F, top + 6.0F, plotW - badgeW - 4.0F, Text.Align.LEFT);
-            Text.drawLine(canvas, clock(at[bar]), ShopTheme.bold(), 6.5F, ShopTheme.text(),
+            Text.drawLine(canvas, axisTime(chart, at[bar], true), ShopTheme.bold(), 6.5F, ShopTheme.text(),
                     x, timeTop + TIME_H / 2.0F, plotW - 2.0F, Text.Align.CENTER);
         }
     }
@@ -190,7 +212,12 @@ public final class ChartRenderer {
         return (float) (top + height - ratio * height);
     }
 
-    private static String clock(long epochSecond) {
-        return CLOCK.format(Instant.ofEpochSecond(epochSecond));
+    /** 时间轴文字：日/周显示日期，其余显示时钟；悬停时分钟/小时周期补上日期。 */
+    private static String axisTime(StockMarketState.Chart chart, long epochSecond, boolean detailed) {
+        var at = Instant.ofEpochSecond(epochSecond).atZone(chart.zone);
+        if (chart.period.isCalendar()) {
+            return DATE.format(at);
+        }
+        return (detailed ? DATE_CLOCK : CLOCK).format(at);
     }
 }
