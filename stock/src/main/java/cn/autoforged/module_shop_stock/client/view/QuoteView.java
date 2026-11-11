@@ -28,6 +28,12 @@ public final class QuoteView implements StockView {
     private static final float DETAIL_GAP = 6.0F;
     private static final float BOOK_ROW = 8.5F;
     private static final float CHIP_H = 11.0F;
+    private static final float TABLE_MAX_W = 330.0F;
+    private static final float TABLE_MIN_W = 200.0F;
+    private static final float DETAIL_MIN_W = 176.0F;
+    /** 详情栏够宽时改双栏：左 K 线，右盘口 + 下单。 */
+    private static final float WIDE_DETAIL_W = 400.0F;
+    private static final float SIDE_W = 176.0F;
 
     /** 跨界面重建保留：表格滚动、排序、行业与范围筛选。 */
     private static final ListTable TABLE = new ListTable();
@@ -174,19 +180,12 @@ public final class QuoteView implements StockView {
         List<Col> out = new ArrayList<>();
         out.add(new Col("code", tr("gui.stock.v2.col.code"), 42, Text.Align.LEFT, false));
         out.add(new Col("name", tr("gui.stock.v2.col.name"), 0, Text.Align.LEFT, false));
-        if (tw >= 400) {
-            out.add(new Col("sector", tr("gui.stock.v2.col.sector"), 30, Text.Align.LEFT, false));
-        }
         out.add(new Col("price", tr("gui.stock.v2.col.price"), 40, Text.Align.RIGHT, true));
-        if (tw >= 340) {
+        if (tw >= 290) {
             out.add(new Col("chg", tr("gui.stock.v2.col.chg"), 34, Text.Align.RIGHT, true));
         }
         out.add(new Col("pct", tr("gui.stock.v2.col.pct"), 44, Text.Align.RIGHT, true));
-        if (tw >= 440) {
-            out.add(new Col("open", tr("gui.stock.v2.col.open"), 36, Text.Align.RIGHT, false));
-            out.add(new Col("prev", tr("gui.stock.v2.col.prev"), 36, Text.Align.RIGHT, false));
-        }
-        if (tw >= 340) {
+        if (tw >= 250) {
             out.add(new Col("vol", tr("gui.stock.v2.col.vol"), 46, Text.Align.RIGHT, true));
         }
         out.add(new Col("star", "★", 14, Text.Align.CENTER, false));
@@ -260,8 +259,13 @@ public final class QuoteView implements StockView {
         syncFields();
 
         float fw = b.w() >= 600.0F ? 66.0F : 54.0F;
-        float dw = Math.max(150.0F, Math.min(176.0F, b.w() * 0.25F));
-        float tw = b.w() - fw - dw;
+        // 列表只占够用的宽度（代码/名称/现价/涨跌/涨跌幅/成交量），其余全部给详情栏和 K 线
+        float rest = b.w() - fw;
+        float tw = Math.min(TABLE_MAX_W, Math.max(0.0F, rest - DETAIL_MIN_W));
+        if (tw < TABLE_MIN_W) {
+            tw = Math.min(TABLE_MIN_W, rest * 0.5F);
+        }
+        float dw = rest - tw;
         drawFilter(c, b, b.x(), b.y(), fw, b.h());
         drawTable(c, b, b.x() + fw, b.y(), tw, b.h());
         drawDetail(c, b, b.x() + fw + tw, b.y(), dw, b.h());
@@ -482,6 +486,28 @@ public final class QuoteView implements StockView {
         float cy = y + 3.0F;
         drawHeader(c, def, q, pos, px, cy, pw);
         cy += 26.0F;
+
+        if (w >= WIDE_DETAIL_W) {
+            // 双栏：左侧统计 + K 线吃满高度，右侧盘口 + 下单
+            float sideW = SIDE_W;
+            float lw = pw - sideW - 9.0F;
+            float sx = px + lw + 9.0F;
+            float top = cy;
+            float bottom = y + h - 3.0F;
+            Draw.fill(c, sx - 4.75F, top, 0.5F, bottom - top, 0, ShopTheme.borderDim());
+            float ly = top;
+            if (bottom - ly - 36.0F - CHIP_H - 2.0F >= 90.0F) {
+                drawStats(c, def, q, pos, px, ly, lw);
+                ly += 36.0F;
+            }
+            float wideChartH = Math.max(36.0F, bottom - ly - CHIP_H - 2.0F);
+            drawChartBlock(c, f, def, px, ly, lw, wideChartH);
+            float bookHeight = 9.0F + 5 * BOOK_ROW + 3.0F;
+            drawBook(c, f, q, sx, top, sideW);
+            drawForm(c, f, def, q, pos, sx, top + bookHeight + 4.0F, sideW, compact);
+            updateChart(def.symbol);
+            return;
+        }
 
         // 自上而下：统计格（高度够才画）、K 线（吃掉剩余高度）、盘口、下单区
         float formH = compact ? 63.0F : 100.0F;

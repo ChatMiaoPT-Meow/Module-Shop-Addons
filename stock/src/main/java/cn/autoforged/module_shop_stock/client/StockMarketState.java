@@ -19,7 +19,7 @@ import net.minecraft.network.chat.Component;
 
 /** 客户端缓存：24+ 股票定义、五档买卖盘口、多空双向持仓、委托、自动快讯与 K 线滚轮缩放状态。 */
 public final class StockMarketState {
-    public static final int DEFAULT_ZOOM_BARS = 32;
+    public static final int DEFAULT_ZOOM_BARS = 60;
     /** 日/周周期的默认可见根数。 */
     public static final int DEFAULT_CALENDAR_ZOOM_BARS = 60;
     public static final int MIN_ZOOM_BARS = 8;
