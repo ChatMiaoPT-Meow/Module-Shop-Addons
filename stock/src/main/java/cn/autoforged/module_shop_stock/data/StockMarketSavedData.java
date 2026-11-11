@@ -227,9 +227,12 @@ public final class StockMarketSavedData extends SavedData {
         if (typical <= 0L) {
             typical = def == null ? 100_000L : Math.max(1_000L, def.depth * 100L);
         }
-        BarHistorySeeder.seedCoarse(quote.book, System.currentTimeMillis() / 1000L, quote.price,
-                def == null ? quote.price : def.basePrice, def == null ? 0.04D : def.volatility, typical,
-                def == null ? 0L : def.symbol.hashCode());
+        long nowSec = System.currentTimeMillis() / 1000L;
+        long baseP = def == null ? quote.price : def.basePrice;
+        double volP = def == null ? 0.04D : def.volatility;
+        long symSeed = def == null ? 0L : def.symbol.hashCode();
+        BarHistorySeeder.seedCoarse(quote.book, nowSec, quote.price, baseP, volP, typical, symSeed);
+        BarHistorySeeder.seedIntradayCoarse(quote.book, nowSec, quote.price, baseP, volP, typical, symSeed);
     }
 
     private static CompoundTag saveKline(Quote quote) {
@@ -773,6 +776,9 @@ public final class StockMarketSavedData extends SavedData {
                 seedBars(quote, def, quote.price, def.symbol.hashCode());
                 finishBars(quote, def, true, true);
                 this.quotes.put(def.symbol, quote);
+            } else {
+                // 对已有存档自动补足分线/时线/日线种子深度（不改真实柱），确保旧档无需删档即可顺畅滚轮缩放
+                finishBars(quote, def, false, false);
             }
             MarketMakerEngine.rebuildOrderBook(this, def, quote);
         }

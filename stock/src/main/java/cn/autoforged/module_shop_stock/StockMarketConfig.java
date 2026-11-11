@@ -1,8 +1,8 @@
 package cn.autoforged.module_shop_stock;
 
-import cn.autoforged.module_shop_stock.market.model.PriceParams;
 import cn.autoforged.module_shop_stock.market.Quote;
 import cn.autoforged.module_shop_stock.market.bars.BarPeriod;
+import cn.autoforged.module_shop_stock.market.model.PriceParams;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.Map;
@@ -39,14 +39,16 @@ public final class StockMarketConfig {
     public static final ModConfigSpec.IntValue AUTO_NEWS_MAX_TICKS;
     public static final ModConfigSpec.IntValue AUTO_NEWS_MAX_IMPACT;
 
-    // ---- price_model：价格模型 v3 ----
+    // ---- price_model：价格模型 v3（波段动量增强版）----
     public static final ModConfigSpec.IntValue PRICE_MODEL_VERSION;
     public static final ModConfigSpec.DoubleValue PM_VOLATILITY_MULTIPLIER;
     public static final ModConfigSpec.DoubleValue PM_MEAN_REVERSION_PER_HOUR;
+    public static final ModConfigSpec.DoubleValue PM_DIFFUSION_SHARE;
     public static final ModConfigSpec.DoubleValue PM_KAPPA_FAIR_PER_HOUR;
     public static final ModConfigSpec.DoubleValue PM_KAPPA_TREND_PER_HOUR;
     public static final ModConfigSpec.DoubleValue PM_KAPPA_SIGMA_PER_HOUR;
     public static final ModConfigSpec.DoubleValue PM_XI_SIGMA;
+    public static final ModConfigSpec.DoubleValue PM_SIGMA_MIN_RATIO;
     public static final ModConfigSpec.DoubleValue PM_FAIR_SHOCK_SHARE;
     public static final ModConfigSpec.DoubleValue PM_FAIR_FOLLOW;
     public static final ModConfigSpec.DoubleValue PM_SIGMA_TREND_RATIO;
@@ -54,6 +56,9 @@ public final class StockMarketConfig {
     public static final ModConfigSpec.DoubleValue PM_THEME_JUMP_RATIO;
     public static final ModConfigSpec.DoubleValue PM_MU_CAP;
     public static final ModConfigSpec.DoubleValue PM_TICK_MOVE_CAP;
+    public static final ModConfigSpec.DoubleValue PM_BAR_MOVE_COINS;
+    public static final ModConfigSpec.DoubleValue PM_BAR_FAIR_SHARE;
+    public static final ModConfigSpec.DoubleValue PM_BAR_FAIR_MAX_SCALE;
     public static final ModConfigSpec.DoubleValue PM_DAY_LIMIT_PCT;
     public static final ModConfigSpec.DoubleValue PM_JUMP_PROB_PER_HOUR;
     public static final ModConfigSpec.DoubleValue PM_JUMP_SCALE;
@@ -134,40 +139,50 @@ public final class StockMarketConfig {
         b.pop();
         b.push("price_model");
 
-        PRICE_MODEL_VERSION = b.comment("价格模型版本：3 = 对数 OU 公允价 + EWMA 波动率 + 日限（2.3 新模型）；2 = 旧随机游走（回滚用，个股波动自动按旧口径还原）")
+        PRICE_MODEL_VERSION = b.comment("价格模型版本：3 = 订单流波段 + 对数 OU 公允价 + EWMA 波动率 + 日限；2 = 旧随机游走（回滚用）")
                 .defineInRange("priceModelVersion", 3, 2, 3);
         PM_VOLATILITY_MULTIPLIER = b.comment("v3 全局波动率倍率（个股 volatility 是小时对数波动率，这里再整体放大/缩小）")
                 .defineInRange("volatilityMultiplier", 1.0D, 0.2D, 5.0D);
-        PM_MEAN_REVERSION_PER_HOUR = b.comment("现价追公允价的强度（每小时，0.8 = 约 52 分钟缩小一半的偏差）")
-                .defineInRange("meanReversionPerHour", 0.8D, 0.0D, 20.0D);
-        PM_KAPPA_FAIR_PER_HOUR = b.comment("公允价拉回基准价的强度（每小时，0.15 = 约 4.6 小时缩小一半）")
-                .defineInRange("kappaFairPerHour", 0.15D, 0.0D, 5.0D);
-        PM_KAPPA_TREND_PER_HOUR = b.comment("趋势（漂移）自然消退速度（每小时）")
-                .defineInRange("kappaTrendPerHour", 1.2D, 0.05D, 20.0D);
+        PM_MEAN_REVERSION_PER_HOUR = b.comment("现价向公允价收敛的强度（每小时）")
+                .defineInRange("meanReversionPerHour", 0.60D, 0.0D, 20.0D);
+        PM_DIFFUSION_SHARE = b.comment("直接进入单 tick 随机扩散的波动份额（其余方差由日内波段动量承载，避免 1 分线原地毛刺横盘）")
+                .defineInRange("diffusionShare", 0.70D, 0.2D, 1.0D);
+        PM_KAPPA_FAIR_PER_HOUR = b.comment("公允价缓慢回归基准价的强度（每小时，值越小日内波段越舒展）")
+                .defineInRange("kappaFairPerHour", 0.10D, 0.0D, 5.0D);
+        PM_KAPPA_TREND_PER_HOUR = b.comment("日内订单流波段动量的自然衰减速度（每小时，3.2 对应约 15～20 分钟一段波段）")
+                .defineInRange("kappaTrendPerHour", 3.2D, 0.05D, 20.0D);
         PM_KAPPA_SIGMA_PER_HOUR = b.comment("瞬时波动率回归个股标定值的速度（每小时，躁动退烧速度）")
-                .defineInRange("kappaSigmaPerHour", 2.5D, 0.1D, 50.0D);
+                .defineInRange("kappaSigmaPerHour", 2.2D, 0.1D, 50.0D);
         PM_XI_SIGMA = b.comment("瞬时波动率自身的噪声强度（越大波动聚集越明显）")
-                .defineInRange("xiSigma", 0.45D, 0.0D, 2.0D);
-        PM_FAIR_SHOCK_SHARE = b.comment("每个 tick 的随机冲击中永久计入公允价的比例；其余部分是会被均值回归吃掉的临时噪声")
-                .defineInRange("fairShockShare", 0.8D, 0.0D, 1.0D);
-        PM_FAIR_FOLLOW = b.comment("趋势传导到公允价的比例（其余部分直接推现价）")
-                .defineInRange("fairFollow", 0.35D, 0.0D, 1.0D);
-        PM_SIGMA_TREND_RATIO = b.comment("趋势噪声强度，相对个股小时波动的比例")
-                .defineInRange("sigmaTrendRatio", 1.0D, 0.0D, 5.0D);
-        PM_THEME_PROB_PER_HOUR = b.comment("每小时触发一次\"主题行情\"（给趋势一个温和推力）的概率")
-                .defineInRange("themeProbPerHour", 0.08D, 0.0D, 5.0D);
-        PM_THEME_JUMP_RATIO = b.comment("主题行情推力，相对个股小时波动的比例")
-                .defineInRange("themeJumpRatio", 0.8D, 0.0D, 10.0D);
-        PM_MU_CAP = b.comment("趋势（每小时对数漂移）绝对值上限")
-                .defineInRange("muCap", 0.045D, 0.001D, 0.5D);
+                .defineInRange("xiSigma", 0.48D, 0.0D, 2.0D);
+        PM_SIGMA_MIN_RATIO = b.comment("瞬时波动率相对标定值的下限比例（防止个股跌入长时间死水横盘）")
+                .defineInRange("sigmaMinRatio", 0.65D, 0.2D, 1.0D);
+        PM_FAIR_SHOCK_SHARE = b.comment("每个 tick 的随机冲击中永久计入公允价的比例")
+                .defineInRange("fairShockShare", 0.92D, 0.0D, 1.0D);
+        PM_FAIR_FOLLOW = b.comment("波段趋势传导到公允价的比例（越高越不易被均值回归抵消）")
+                .defineInRange("fairFollow", 0.94D, 0.0D, 1.0D);
+        PM_SIGMA_TREND_RATIO = b.comment("订单流波段噪声强度，相对有效小时波动的比例")
+                .defineInRange("sigmaTrendRatio", 3.5D, 0.0D, 15.0D);
+        PM_THEME_PROB_PER_HOUR = b.comment("每小时触发一次波段突破催化的概率")
+                .defineInRange("themeProbPerHour", 1.20D, 0.0D, 10.0D);
+        PM_THEME_JUMP_RATIO = b.comment("波段突破推力，相对有效小时波动的比例")
+                .defineInRange("themeJumpRatio", 1.90D, 0.0D, 10.0D);
+        PM_MU_CAP = b.comment("波段趋势（每小时对数漂移）基准绝对值上限")
+                .defineInRange("muCap", 0.16D, 0.001D, 0.6D);
         PM_TICK_MOVE_CAP = b.comment("单个行情 tick 的对数变动硬上限（0.025 = 约 2.5%）")
                 .defineInRange("tickMoveCap", 0.025D, 0.001D, 0.5D);
-        PM_DAY_LIMIT_PCT = b.comment("日涨跌幅限制（相对昨收，0.12 = ±12%）：接近时减速，到顶硬夹；0 = 关闭")
+        PM_BAR_MOVE_COINS = b.comment("1 分钟有效扩散的星币标准差下限（防止低价整数股取整后不动，并与公允价波段协同缩放；0 = 关闭）")
+                .defineInRange("barMoveCoins", 0.78D, 0.0D, 20.0D);
+        PM_BAR_FAIR_SHARE = b.comment("低价股整数补偿传导至公允价与波段趋势的指数份额（避免现价独自放大造成原地锯齿横盘）")
+                .defineInRange("barFairShare", 0.82D, 0.0D, 1.0D);
+        PM_BAR_FAIR_MAX_SCALE = b.comment("低价股整数补偿传导至公允价与波段趋势的最大倍率上限")
+                .defineInRange("barFairMaxScale", 3.20D, 1.0D, 8.0D);
+        PM_DAY_LIMIT_PCT = b.comment("日涨跌幅限制（相对昨收，0.12 = ±12%）：公允价与现价协同软着陆；0 = 关闭")
                 .defineInRange("dayLimitPct", 0.12D, 0.0D, 1.0D);
         PM_JUMP_PROB_PER_HOUR = b.comment("每小时出现一次随机跳空的概率")
                 .defineInRange("jumpProbPerHour", 0.15D, 0.0D, 20.0D);
         PM_JUMP_SCALE = b.comment("跳空幅度标准差，相对个股小时波动的比例")
-                .defineInRange("jumpScale", 0.6D, 0.0D, 10.0D);
+                .defineInRange("jumpScale", 0.55D, 0.0D, 10.0D);
         PM_IMPACT_COEF = b.comment("平方根成交冲击系数")
                 .defineInRange("impactCoef", 0.40D, 0.0D, 5.0D);
         PM_IMPACT_CAP = b.comment("单笔成交冲击上限（0.02 = 2%）")
@@ -215,10 +230,12 @@ public final class StockMarketConfig {
         try {
             p.dtSec = UPDATE_INTERVAL_SECONDS.get();
             p.meanReversionPerHour = PM_MEAN_REVERSION_PER_HOUR.get();
+            p.diffusionShare = PM_DIFFUSION_SHARE.get();
             p.kappaFairPerHour = PM_KAPPA_FAIR_PER_HOUR.get();
             p.kappaTrendPerHour = PM_KAPPA_TREND_PER_HOUR.get();
             p.kappaSigmaPerHour = PM_KAPPA_SIGMA_PER_HOUR.get();
             p.xiSigma = PM_XI_SIGMA.get();
+            p.sigmaMinRatio = PM_SIGMA_MIN_RATIO.get();
             p.fairShockShare = PM_FAIR_SHOCK_SHARE.get();
             p.fairFollow = PM_FAIR_FOLLOW.get();
             p.sigmaTrendRatio = PM_SIGMA_TREND_RATIO.get();
@@ -226,6 +243,9 @@ public final class StockMarketConfig {
             p.themeJumpRatio = PM_THEME_JUMP_RATIO.get();
             p.muCap = PM_MU_CAP.get();
             p.tickMoveCap = PM_TICK_MOVE_CAP.get();
+            p.barMoveCoins = PM_BAR_MOVE_COINS.get();
+            p.barFairShare = PM_BAR_FAIR_SHARE.get();
+            p.barFairMaxScale = PM_BAR_FAIR_MAX_SCALE.get();
             p.dayLimitPct = PM_DAY_LIMIT_PCT.get();
             p.jumpProbPerHour = PM_JUMP_PROB_PER_HOUR.get();
             p.jumpScale = PM_JUMP_SCALE.get();

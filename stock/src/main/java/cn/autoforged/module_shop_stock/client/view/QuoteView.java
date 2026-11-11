@@ -256,6 +256,9 @@ public final class QuoteView implements StockView {
         }
         StockMarketState.zoomBars = Motion.approach(StockMarketState.zoomBars,
                 (float) StockMarketState.targetZoomBars, b.dtMs(), 75.0F);
+        if (Math.abs(StockMarketState.zoomBars - StockMarketState.targetZoomBars) < 0.08F) {
+            StockMarketState.zoomBars = StockMarketState.targetZoomBars;
+        }
         syncFields();
 
         float fw = b.w() >= 600.0F ? 66.0F : 54.0F;
@@ -1050,7 +1053,8 @@ public final class QuoteView implements StockView {
     public boolean mouseDragged(AddonFrame f, double mx, double my, int button, double dx, double dy) {
         if (this.draggingChart) {
             this.dragAccumX += dx;
-            double barPx = Math.max(2.0D, 110.0D / Math.max(8.0F, StockMarketState.zoomBars));
+            double plotW = Math.max(36.0D, this.chartRect[2] - 28.0D);
+            double barPx = Math.max(1.5D, plotW / Math.max(2, StockMarketState.effectiveVisibleBars()));
             int deltaBars = (int) (this.dragAccumX / barPx);
             if (deltaBars != 0) {
                 this.dragAccumX -= deltaBars * barPx;
@@ -1070,7 +1074,9 @@ public final class QuoteView implements StockView {
     public boolean mouseScrolled(AddonFrame f, double mx, double my, double amount) {
         if (this.chartShown && Ui.in(mx, my, this.chartRect[0], this.chartRect[1], this.chartRect[2],
                 this.chartRect[3])) {
-            StockMarketState.zoomChart(amount);
+            double plotW = Math.max(36.0D, this.chartRect[2] - 28.0D);
+            double ratio = (mx - (this.chartRect[0] + 3.0D)) / plotW;
+            StockMarketState.zoomChart(amount, ratio);
             return true;
         }
         return TABLE.wheel(mx, my, amount, net.minecraft.client.gui.screens.Screen.hasShiftDown());

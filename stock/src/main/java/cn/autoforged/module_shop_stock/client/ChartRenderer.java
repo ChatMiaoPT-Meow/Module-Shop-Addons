@@ -41,9 +41,7 @@ public final class ChartRenderer {
             return;
         }
 
-        int desiredBars = Math.max(StockMarketState.MIN_ZOOM_BARS,
-                Math.min(StockMarketState.MAX_ZOOM_BARS, Math.round(StockMarketState.zoomBars)));
-        int visibleCapacity = Math.min(index, desiredBars);
+        int visibleCapacity = Math.min(index, StockMarketState.effectiveVisibleBars());
         int maxPan = Math.max(0, index - visibleCapacity);
         StockMarketState.panBars = Math.max(0, Math.min(maxPan, StockMarketState.panBars));
         int end = index - StockMarketState.panBars;

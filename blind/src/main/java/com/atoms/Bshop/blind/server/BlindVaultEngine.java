@@ -9,9 +9,11 @@ import com.atoms.Bshop.blind.auction.BlindCatalog;
 import com.atoms.Bshop.blind.auction.BlindCatalog.Relic;
 import com.atoms.Bshop.blind.auction.BlindCatalog.Role;
 import com.atoms.Bshop.blind.auction.BlindCatalog.Tool;
+import com.atoms.Bshop.blind.auction.BlindCatalog.VaultTheme;
 import com.atoms.Bshop.blind.auction.VaultZone;
 import com.atoms.Bshop.blind.data.BlindAuctionSavedData;
 import com.atoms.Bshop.blind.network.BlindAuctionNetwork;
+import com.atoms.Bshop.blind.server.BlindRoom.AiPersona;
 import com.atoms.Bshop.blind.server.BlindRoom.Phase;
 import com.atoms.Bshop.blind.server.BlindRoom.Placed;
 import com.atoms.Bshop.blind.server.BlindRoom.Seat;
@@ -24,6 +26,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -32,14 +35,13 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
 /**
- * 遗迹盲仓服务端。流程：备战（选区 / 鉴定师）→ 匹配 → 五轮暗标 → 开仓 → 返回备战。
+ * 遗迹盲仓服务端核心引擎（v3.6 博弈增强版）。
  *
- * <p>每轮：系统公开揭示一部分藏品（逐轮增多），并按公开信息推算最低估值；公布上一轮全员报价；玩家的角色技能自动生效，可再用 1 个道具；
- * 报价提交即锁定，超时按 0 处理。第 1–4 轮第一名达到第二名的 2.0 / 1.6 / 1.4 / 1.2 倍直接秒仓，
- * 第 5 轮价高者得，全员 0 则流拍。
- *
- * <p>钱：开局收门票（台账记存档，异常退出下次开服退回）；中标者一笔结清「真实价值 − 回收税 − 成交价」，
- * 付不起视为违约流拍；真人中标亏损时，按比例分给同局其他真人（只从已收的亏损里出）。AI 从不动钱。
+ * <p>核心规则与安全隔离：
+ * 1. 联机匹配默认关闭倒计时自动塞 AI（仅凑满真人席位或达到配置的纯真人开局人数后开局，无 AI 混入）。
+ * 2. 单人对战 AI（或任何含 AI 席位的对局）强制标记为「演练模式（practice）」：免门票、使用虚拟演练筹码出价、
+ *    结算时绝不调用 EconomyApi 给玩家发星币或扣星币，彻底杜绝刷星币漏洞，且不写入全服真实成交榜。
+ * 3. 引入仓门封条主题、藏品同源套组共鸣溢价（+12%）、第 5 道具「声呐探针」、每轮对手出价节奏博弈复盘与四流派心理 AI。
  */
 public final class BlindVaultEngine {
     private static final Random RANDOM = new Random();
@@ -124,28 +126,49 @@ public final class BlindVaultEngine {
         if (PLAYER_ROOM.containsKey(id) || queueOf(id) >= 0) return;
         BlindAuctionSavedData.Loadout l = loadout(p);
         VaultZone zone = VaultZone.byId(l.zone);
-        long balance = balance(id);
-        if (balance < Math.max(zone.minStarCoinReq, zone.entryFee)) {
-            BlindAuctionNetwork.sendToast(p, "进入【" + zone.title + "】需持有 ≥ "
-                    + fmt(Math.max(zone.minStarCoinReq, zone.entryFee)) + " ★");
-            return;
-        }
+
+        // 单人 AI 模式：纯演练博弈，免门票、不限持有门槛、不结算真实星币
         if (l.single) {
-            launch(p.server, zone, List.of(id));
+            launch(p.server, zone, List.of(id), true, true);
             return;
         }
+
+        long need = Math.max(zone.minStarCoinReq, zone.entryFee);
+        if (balance(id) < need) {
+            BlindAuctionNetwork.sendToast(p, "联机进入【" + zone.title + "】需持有 ≥ " + fmt(need) + " ★");
+            return;
+        }
+
         LinkedHashSet<UUID> queue = QUEUES.computeIfAbsent(zone.id, k -> new LinkedHashSet<>());
         queue.add(id);
         if (queue.size() >= zone.seatCount) {
             List<UUID> players = new ArrayList<>(new ArrayList<>(queue).subList(0, zone.seatCount));
             players.forEach(queue::remove);
-            if (queue.isEmpty()) QUEUE_WAIT.remove(zone.id);
-            launch(p.server, zone, players);
+            refreshQueueWait(zone, queue);
+            launch(p.server, zone, players, false, false);
         } else {
-            QUEUE_WAIT.putIfAbsent(zone.id, BlindAuctionConfig.MATCHMAKING_WAIT_SECONDS.get());
+            refreshQueueWait(zone, queue);
         }
         syncQueue(p.server, zone.id);
         syncPlayer(p);
+    }
+
+    /**
+     * 刷新联机队列倒计时：默认关闭自动 AI 补位（multiplayerAutoAiFill = false），
+     * 人数未达纯真人开局下限时永不启动倒计时强塞 AI。
+     */
+    private static void refreshQueueWait(VaultZone zone, LinkedHashSet<UUID> queue) {
+        if (queue == null || queue.isEmpty()) {
+            QUEUE_WAIT.remove(zone.id);
+            return;
+        }
+        boolean autoAi = BlindAuctionConfig.MULTIPLAYER_AUTO_AI_FILL.get();
+        int minHumans = Math.max(2, Math.min(zone.seatCount, BlindAuctionConfig.MIN_MULTIPLAYER_PLAYERS.get()));
+        if (autoAi || (minHumans < zone.seatCount && queue.size() >= minHumans)) {
+            QUEUE_WAIT.putIfAbsent(zone.id, BlindAuctionConfig.MATCHMAKING_WAIT_SECONDS.get());
+        } else {
+            QUEUE_WAIT.remove(zone.id);
+        }
     }
 
     public static void cancelQueue(ServerPlayer p) {
@@ -157,7 +180,7 @@ public final class BlindVaultEngine {
     private static int leaveQueue(UUID id) {
         for (Map.Entry<Integer, LinkedHashSet<UUID>> e : QUEUES.entrySet()) {
             if (e.getValue().remove(id)) {
-                if (e.getValue().isEmpty()) QUEUE_WAIT.remove(e.getKey());
+                refreshQueueWait(VaultZone.byId(e.getKey()), e.getValue());
                 return e.getKey();
             }
         }
@@ -171,30 +194,62 @@ public final class BlindVaultEngine {
         return -1;
     }
 
-    private static void launch(MinecraftServer server, VaultZone zone, List<UUID> players) {
+    private static void launch(MinecraftServer server, VaultZone zone, List<UUID> players, boolean practiceMode,
+            boolean fillAi) {
         BlindAuctionSavedData data = BlindAuctionSavedData.get(server);
-        BlindRoom room = new BlindRoom(nextRoomId++, zone, generate(zone));
+        boolean effectivePractice = practiceMode || fillAi;
+        VaultTheme theme = VaultTheme.values()[RANDOM.nextInt(VaultTheme.values().length)];
+        BlindRoom room = new BlindRoom(nextRoomId++, zone, effectivePractice, theme, generate(zone, theme));
+
         for (UUID id : players) {
             ServerPlayer sp = server.getPlayerList().getPlayer(id);
             if (sp == null) continue;
-            if (!withdraw(id, zone.entryFee, "遗迹盲仓门票 " + zone.title)) {
-                BlindAuctionNetwork.sendToast(sp, "扣除门票失败，未能入座");
-                syncPlayer(sp);
-                continue;
+            long feePaid = 0L;
+            if (!effectivePractice) {
+                if (!withdraw(id, zone.entryFee, "遗迹盲仓门票 " + zone.title)) {
+                    BlindAuctionNetwork.sendToast(sp, "扣除门票失败，未能入座");
+                    syncPlayer(sp);
+                    continue;
+                }
+                feePaid = zone.entryFee;
+                data.ledgerAdd(id, feePaid);
             }
-            data.ledgerAdd(id, zone.entryFee);
-            room.seats.add(new Seat(id, sp.getGameProfile().getName(), data.loadout(id).role, zone.entryFee));
+            room.seats.add(new Seat(id, sp.getGameProfile().getName(), data.loadout(id).role, feePaid));
+        }
+
+        // 真人联机若因个别玩家掉线/余额不足导致不足 2 人，立即原路退回门票并取消开局，绝不塞 AI 凑数
+        if (!effectivePractice && room.seats.size() < 2) {
+            for (Seat s : room.seats) {
+                if (s.human() && s.feePaid > 0L && deposit(s.uuid, s.feePaid, "遗迹盲仓：人数不足退回门票")) {
+                    data.ledgerRemove(s.uuid, s.feePaid);
+                }
+                ServerPlayer sp = s.human() ? server.getPlayerList().getPlayer(s.uuid) : null;
+                if (sp != null) {
+                    BlindAuctionNetwork.sendToast(sp, "有效入座玩家不足 2 人，已退回门票");
+                    syncPlayer(sp);
+                }
+            }
+            return;
         }
         if (room.seats.isEmpty()) return;
-        List<String> names = new ArrayList<>(List.of(AI_NAMES));
-        Collections.shuffle(names, RANDOM);
-        int ai = 0;
-        while (room.seats.size() < zone.seatCount) {
-            Seat s = new Seat(null, names.get(ai++ % names.size()) + "·AI", 0, 0L);
-            s.aiBias = zone.aiBiasLow + RANDOM.nextDouble() * (zone.aiBiasHigh - zone.aiBiasLow);
-            s.aiStyle = 0.88D + RANDOM.nextDouble() * 0.20D;
-            room.seats.add(s);
+
+        if (fillAi) {
+            List<String> names = new ArrayList<>(List.of(AI_NAMES));
+            Collections.shuffle(names, RANDOM);
+            List<AiPersona> personas = new ArrayList<>(List.of(AiPersona.values()));
+            Collections.shuffle(personas, RANDOM);
+            int ai = 0;
+            while (room.seats.size() < zone.seatCount) {
+                AiPersona persona = personas.get(ai % personas.size());
+                Seat s = new Seat(null, names.get(ai % names.size()) + "·AI", RANDOM.nextInt(Role.values().length), 0L);
+                s.aiPersona = persona;
+                s.aiBias = zone.aiBiasLow + RANDOM.nextDouble() * (zone.aiBiasHigh - zone.aiBiasLow);
+                s.aiStyle = 0.90D + RANDOM.nextDouble() * 0.22D;
+                room.seats.add(s);
+                ai++;
+            }
         }
+
         for (Seat s : room.seats) s.know = new int[room.items.size()];
         ROOMS.put(room.id, room);
         for (Seat s : room.seats) {
@@ -203,27 +258,46 @@ public final class BlindVaultEngine {
         startRound(room);
         for (Seat s : room.seats) {
             ServerPlayer sp = s.human() ? server.getPlayerList().getPlayer(s.uuid) : null;
-            if (sp != null) BlindAuctionNetwork.sendToast(sp, "已进入【" + zone.title + "】，第 1 轮开始");
+            if (sp != null) {
+                String tag = room.practice ? "（AI演练·免门票不结算星币）" : "";
+                BlindAuctionNetwork.sendToast(sp, "已进入【" + zone.title + " · " + theme.title + "】" + tag);
+            }
         }
         syncRoom(server, room);
     }
 
-    /** 往 8×6 仓库里随机摆藏品（各自占 1–4 格，不重叠），约占满 55%–70% 的格子。 */
-    private static List<Placed> generate(VaultZone zone) {
-        int[] weights = BlindCatalog.tierWeights(zone);
+    /** 往 8×6 仓库里按仓门封条主题随机摆藏品（各自占 1–4 格，不重叠）。 */
+    private static List<Placed> generate(VaultZone zone, VaultTheme theme) {
+        int[] baseWeights = BlindCatalog.tierWeights(zone).clone();
+        if (theme == VaultTheme.ROYAL_TREASURY || theme == VaultTheme.WEATHERED_RUIN) {
+            baseWeights[3] += 5;
+            baseWeights[4] += 4;
+            baseWeights[5] += 2;
+        } else if (theme == VaultTheme.ARCANE_SANCTUM) {
+            baseWeights[2] += 4;
+            baseWeights[3] += 6;
+            baseWeights[4] += 3;
+        }
         int total = 0;
-        for (int w : weights) total += w;
+        for (int w : baseWeights) total += w;
+
+        double dudChance = zone.dudChance * (theme == VaultTheme.WEATHERED_RUIN ? 1.45D : 1.0D);
+        double gemChance = zone.gemChance * (theme == VaultTheme.ROYAL_TREASURY ? 1.50D
+                : theme == VaultTheme.WEATHERED_RUIN ? 1.40D : 1.0D);
+
         boolean[] used = new boolean[BlindCatalog.CELLS];
         List<Placed> out = new ArrayList<>();
-        int target = 26 + RANDOM.nextInt(8);
+        int target = theme == VaultTheme.HOARDER_CACHE ? 34 + RANDOM.nextInt(6) : 26 + RANDOM.nextInt(8);
+        int preferredSet = theme == VaultTheme.ARCANE_SANCTUM ? 1 + RANDOM.nextInt(4) : 0;
         int filled = 0;
-        for (int attempt = 0; attempt < 600 && filled < target; attempt++) {
+
+        for (int attempt = 0; attempt < 650 && filled < target; attempt++) {
             int roll = RANDOM.nextInt(total);
             int tier = 0;
-            while (roll >= weights[tier]) roll -= weights[tier++];
+            while (roll >= baseWeights[tier]) roll -= baseWeights[tier++];
             int t = tier;
             List<Relic> pool = BlindCatalog.RELICS.stream().filter(r -> r.tier() == t).toList();
-            Relic relic = pool.get(RANDOM.nextInt(pool.size()));
+            Relic relic = pickThemedRelic(pool, theme, preferredSet);
             int x = RANDOM.nextInt(BlindCatalog.COLS - relic.w() + 1);
             int y = RANDOM.nextInt(BlindCatalog.ROWS - relic.h() + 1);
             boolean free = true;
@@ -243,20 +317,34 @@ public final class BlindVaultEngine {
             double mult = 1.0D;
             if (relic.tier() >= BlindCatalog.GRADE_TIER) {
                 double g = RANDOM.nextDouble();
-                if (g < zone.dudChance) {
+                if (g < dudChance) {
                     grade = 1;
                     mult = BlindCatalog.DUD_MULT;
-                } else if (g < zone.dudChance + zone.gemChance) {
+                } else if (g < dudChance + gemChance) {
                     grade = 2;
                     mult = BlindCatalog.GEM_MULT;
                 }
             }
             double base = relic.min() + RANDOM.nextDouble() * (relic.max() - relic.min());
-            long value = Math.max(BlindCatalog.tierMin(zone, relic.tier()), Math.round(base * zone.valueScale * mult / 10.0D) * 10L);
+            long value = Math.max(BlindCatalog.tierMin(zone, relic.tier()),
+                    Math.round(base * zone.valueScale * mult / 10.0D) * 10L);
             out.add(new Placed(out.size(), relic, x, y, value, grade));
             filled += relic.w() * relic.h();
         }
         return out;
+    }
+
+    private static Relic pickThemedRelic(List<Relic> pool, VaultTheme theme, int preferredSet) {
+        if (pool.size() <= 1) return pool.get(0);
+        if (theme == VaultTheme.ANCIENT_ARMORY && RANDOM.nextDouble() < 0.60D) {
+            List<Relic> big = pool.stream().filter(r -> r.w() * r.h() >= 2).toList();
+            if (!big.isEmpty()) return big.get(RANDOM.nextInt(big.size()));
+        }
+        if (preferredSet > 0 && RANDOM.nextDouble() < 0.45D) {
+            List<Relic> setPool = pool.stream().filter(r -> r.setId() == preferredSet).toList();
+            if (!setPool.isEmpty()) return setPool.get(RANDOM.nextInt(setPool.size()));
+        }
+        return pool.get(RANDOM.nextInt(pool.size()));
     }
 
     // ================================================================== 回合
@@ -269,31 +357,105 @@ public final class BlindVaultEngine {
         room.floor = room.floorFor(room.pub);
         double expected = room.expectedFor(room.pub);
 
+        long prevTop = 0L;
+        long prevSecond = 0L;
+        if (r >= 2) {
+            List<Long> prevs = new ArrayList<>();
+            for (Seat s : room.seats) prevs.add(Math.max(0L, s.bids[r - 2]));
+            prevs.sort(Comparator.reverseOrder());
+            if (!prevs.isEmpty()) prevTop = prevs.get(0);
+            if (prevs.size() > 1) prevSecond = prevs.get(1);
+        }
+
         for (Seat s : room.seats) {
             s.bid = 0L;
             s.submitted = false;
             s.toolThisRound = false;
             if (s.human()) {
                 if (r == 1) {
-                    s.log(r, 0, "系统", "仓内共 " + room.items.size() + " 件藏品，占 " + room.occupiedCells() + " 格");
+                    s.log(r, 0, "封条", "【" + room.theme.title + "】" + room.theme.clue);
+                    s.log(r, 0, "系统", "仓内共 " + room.items.size() + " 件藏品，占 " + room.occupiedCells() + " 格"
+                            + (room.practice ? "（AI演练局：使用演练筹码，不扣门票不结算星币）" : ""));
+                } else if (r == 2 && room.comboSetId > 0) {
+                    s.log(r, 0, "封条", "清单残页：仓内检出「" + BlindCatalog.SET_NAMES[room.comboSetId]
+                            + "」共鸣迹象（凑齐≥3件结算享 +12% 套组溢价）");
                 }
                 s.log(r, 0, "系统", reveal);
-                s.log(r, 0, "系统", "第 " + r + " 轮公开估值 ≥ " + fmt(room.floor) + " ★");
+                s.log(r, 0, "系统", "第 " + r + " 轮公开底价 ≥ " + fmt(room.floor) + " ★");
                 roleSkill(room, s);
             } else {
-                // AI 只看公开信息：按期望价值 × 读仓偏差 × 逐轮递增的出价比例
-                double[] prog = {0.30D, 0.39D, 0.47D, 0.54D, 0.61D};
-                double estimate = Math.max(room.floor, expected * s.aiBias);
-                long bid;
-                if (r <= 3 && RANDOM.nextDouble() < 0.12D) {
-                    bid = Math.round(estimate * (0.15D + RANDOM.nextDouble() * 0.15D));
-                } else {
-                    bid = Math.round(estimate * prog[r - 1] * s.aiStyle * (0.95D + RANDOM.nextDouble() * 0.1D));
-                }
-                s.bid = Math.max(0L, Math.round(bid / 100.0D) * 100L);
-                s.aiDelay = 2 + RANDOM.nextInt(Math.max(1, Math.min(15, room.seconds - 3)));
+                s.bid = computeAiBid(room, s, r, expected, prevTop, prevSecond);
+                s.aiDelay = 2 + RANDOM.nextInt(Math.max(1, Math.min(12, room.seconds - 3)));
             }
         }
+    }
+
+    /** 四流派心理博弈 AI：结合公开期望、底价、秒仓倍率与上一轮全场最高报价动态决策。 */
+    private static long computeAiBid(BlindRoom room, Seat s, int r, double expected, long prevTop, long prevSecond) {
+        double estimate = Math.max(room.floor * 1.05D, expected * s.aiBias * s.aiStyle);
+        double buyoutMult = BlindCatalog.buyout(r);
+        long cap = BlindCatalog.practiceChipCap(room.zone);
+        long rawBid;
+
+        switch (s.aiPersona) {
+            case SNIPER -> {
+                // 前 2 轮潜伏或仅卡住防低价秒仓底线；第 4~5 轮突然发力偷鸡
+                if (r <= 2) {
+                    if (r == 2 && prevTop > 0 && buyoutMult > 1.0D && prevTop < estimate * 0.55D && RANDOM.nextDouble() < 0.65D) {
+                        rawBid = Math.round(prevTop / buyoutMult * (1.05D + RANDOM.nextDouble() * 0.08D));
+                    } else {
+                        rawBid = RANDOM.nextDouble() < 0.65D ? 0L : Math.round(estimate * 0.22D);
+                    }
+                } else if (r == 3) {
+                    rawBid = Math.round(estimate * (0.38D + RANDOM.nextDouble() * 0.10D));
+                } else if (r == 4) {
+                    rawBid = Math.round(estimate * (0.72D + RANDOM.nextDouble() * 0.10D));
+                } else {
+                    double target = Math.max(estimate * (0.84D + RANDOM.nextDouble() * 0.11D),
+                            prevTop <= estimate * 0.92D ? prevTop * 1.03D : estimate * 0.86D);
+                    rawBid = Math.round(Math.min(estimate * 0.96D, target));
+                }
+            }
+            case BLUFFER -> {
+                // 前 2 轮高报施压抬价；若有人跟风抬到高位，第 4~5 轮果断弃标让对手高价接盘
+                long myPrev = r >= 2 ? Math.max(0L, s.bids[r - 2]) : 0L;
+                boolean opponentChasedHigh = r >= 3 && prevTop > myPrev && prevTop >= estimate * 0.74D;
+                if (opponentChasedHigh || s.aiBluffFolded) {
+                    s.aiBluffFolded = true;
+                    rawBid = 0L;
+                } else if (r == 1) {
+                    rawBid = Math.round(estimate * (0.54D + RANDOM.nextDouble() * 0.12D));
+                } else if (r == 2) {
+                    rawBid = Math.round(estimate * (0.68D + RANDOM.nextDouble() * 0.10D));
+                } else if (r == 3) {
+                    rawBid = Math.round(estimate * (0.74D + RANDOM.nextDouble() * 0.08D));
+                } else {
+                    rawBid = RANDOM.nextDouble() < 0.30D ? 0L : Math.round(estimate * (0.76D + RANDOM.nextDouble() * 0.08D));
+                }
+            }
+            case RAIDER -> {
+                // 秒仓猎手：第 2~4 轮若计算上一轮头名的秒仓线仍有利可图，直接冲击秒仓倍率！
+                if (r >= 2 && r <= 4 && buyoutMult > 1.0D && prevTop > 0) {
+                    double strike = prevTop * buyoutMult * (1.01D + RANDOM.nextDouble() * 0.04D);
+                    if (strike <= estimate * 0.86D) {
+                        rawBid = Math.round(strike);
+                        break;
+                    }
+                }
+                double[] prog = {0.42D, 0.56D, 0.68D, 0.78D, 0.87D};
+                rawBid = Math.round(estimate * prog[r - 1] * (0.96D + RANDOM.nextDouble() * 0.09D));
+            }
+            default -> {
+                // 稳健估价派：按揭示进度稳步推进至期望价值的 80% 左右，绝不上头
+                double[] prog = {0.32D, 0.45D, 0.58D, 0.70D, 0.81D};
+                rawBid = Math.round(estimate * prog[r - 1] * (0.95D + RANDOM.nextDouble() * 0.10D));
+                if (r >= 3 && prevSecond > estimate * 0.88D) {
+                    rawBid = 0L;
+                }
+            }
+        }
+        long rounded = Math.max(0L, Math.round(rawBid / 100.0D) * 100L);
+        return Math.min(cap, rounded);
     }
 
     /** 按轮次把公开揭示补到目标比例，同步进每个席位的视野；返回给玩家看的说明。 */
@@ -376,7 +538,10 @@ public final class BlindVaultEngine {
                 } else if (r == 2) {
                     long duds = items.stream().filter(p -> p.grade() == 1).count();
                     long gems = items.stream().filter(p -> p.grade() == 2).count();
-                    s.log(r, 1, badge, "仓内残损藏品 " + duds + " 件，完美藏品 " + gems + " 件");
+                    String comboMsg = room.comboBonus > 0
+                            ? "；触发「" + BlindCatalog.SET_NAMES[room.comboSetId] + "」溢价 +" + fmt(room.comboBonus) + " ★"
+                            : "；无套组溢价";
+                    s.log(r, 1, badge, "残损 " + duds + " 件，完美 " + gems + " 件" + comboMsg);
                 } else if (r == 3) {
                     List<Integer> high = items.stream().map(p -> p.relic().tier()).filter(t -> t >= 3).distinct().toList();
                     if (high.isEmpty()) {
@@ -395,7 +560,7 @@ public final class BlindVaultEngine {
                 }
             }
             case ARCHITECT -> {
-                int tier = 6 - r; // 第 1..5 轮 → 神话…优良
+                int tier = 6 - r;
                 int cells = items.stream().filter(p -> p.relic().tier() == tier).mapToInt(Placed::cells).sum();
                 s.log(r, 1, badge, "「" + BlindCatalog.TIER_NAMES[tier] + "」藏品共占 " + cells + " 格");
             }
@@ -403,7 +568,10 @@ public final class BlindVaultEngine {
                 if (r == 1) {
                     s.log(r, 1, badge, "史诗及以上藏品共 " + items.stream().filter(p -> p.relic().tier() >= 3).count() + " 件");
                 } else if (r == 2) {
-                    s.log(r, 1, badge, "其中神话藏品 " + items.stream().filter(p -> p.relic().tier() == 5).count() + " 件");
+                    String setInfo = room.comboSetId > 0
+                            ? "，「" + BlindCatalog.SET_NAMES[room.comboSetId] + "」共 " + room.comboCount + " 件"
+                            : "，未凑齐任何套组";
+                    s.log(r, 1, badge, "神话藏品 " + items.stream().filter(p -> p.relic().tier() == 5).count() + " 件" + setInfo);
                 } else if (r == 4) {
                     s.log(r, 1, badge, tierCounts(items));
                 }
@@ -488,6 +656,38 @@ public final class BlindVaultEngine {
             }
             case SCANNER -> s.log(r, 2, badge, "揭示了 " + learnRandom(s, items, 1, 2, 2) + " 件藏品的品质");
             case GLOWSTICK -> s.log(r, 2, badge, tierCounts(items));
+            case SONAR -> {
+                int cx = cell % BlindCatalog.COLS;
+                int cy = cell / BlindCatalog.COLS;
+                int[][] dirs = {{0, 0}, {-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+                Set<Integer> hitOwners = new LinkedHashSet<>();
+                int emptyMarked = 0;
+                for (int[] d : dirs) {
+                    int nx = cx + d[0];
+                    int ny = cy + d[1];
+                    if (nx < 0 || nx >= BlindCatalog.COLS || ny < 0 || ny >= BlindCatalog.ROWS) continue;
+                    int nc = ny * BlindCatalog.COLS + nx;
+                    int own = room.owner[nc];
+                    if (own < 0) {
+                        if (!s.knownEmpty[nc]) emptyMarked++;
+                        s.knownEmpty[nc] = true;
+                    } else {
+                        hitOwners.add(own);
+                        s.learn(own, 1);
+                    }
+                }
+                if (hitOwners.isEmpty()) {
+                    s.log(r, 2, badge, "十字区域全部为空格（已标出 " + emptyMarked + " 处空格）");
+                } else {
+                    long sumVal = 0L;
+                    for (int own : hitOwners) sumVal += items.get(own).value();
+                    double jitter = 0.94D + RANDOM.nextDouble() * 0.12D;
+                    long loEst = Math.max(10L, Math.round(sumVal * jitter * 0.85D / 10.0D) * 10L);
+                    long hiEst = Math.max(loEst + 10L, Math.round(sumVal * jitter * 1.16D / 10.0D) * 10L);
+                    s.log(r, 2, badge, "十字命中 " + hitOwners.size() + " 件藏品轮廓（标空 " + emptyMarked
+                            + " 格），区域估值约 " + fmt(loEst) + "~" + fmt(hiEst) + " ★");
+                }
+            }
         }
         s.toolUsed[tool.ordinal()] = true;
         s.toolThisRound = true;
@@ -509,8 +709,9 @@ public final class BlindVaultEngine {
             BlindAuctionNetwork.sendToast(p, "报价无效");
             return;
         }
-        if (amount > balance(p.getUUID())) {
-            BlindAuctionNetwork.sendToast(p, "报价超过你的星币余额");
+        long cap = room.practice ? BlindCatalog.practiceChipCap(room.zone) : balance(p.getUUID());
+        if (amount > cap) {
+            BlindAuctionNetwork.sendToast(p, room.practice ? "报价超过演练筹码上限" : "报价超过你的星币余额");
             return;
         }
         seat.bid = amount;
@@ -519,7 +720,7 @@ public final class BlindVaultEngine {
         if (allHumansDone(p.server, room)) {
             endRound(p.server, room);
         } else {
-            BlindAuctionNetwork.sendToast(p, amount == 0 ? "本轮放弃（报价 0）" : "报价已锁定，等待其他玩家");
+            BlindAuctionNetwork.sendToast(p, amount == 0 ? "本轮观望放弃（报价 0）" : "报价已锁定，等待其他席位");
         }
         syncRoom(p.server, room);
     }
@@ -555,14 +756,54 @@ public final class BlindVaultEngine {
             finish(server, room, top, true);
             return;
         }
+        logRoundTempo(room, r, top, second, mult);
         room.round++;
         startRound(room);
+    }
+
+    /** 记录上一轮各席位出价节奏与心理态势，辅助玩家进行《俱乐大玩家》式读牌反推。 */
+    private static void logRoundTempo(BlindRoom room, int r, Seat top, long second, double mult) {
+        StringBuilder sb = new StringBuilder();
+        if (top.bid <= 0L) {
+            sb.append("全员观望（0 ★）");
+        } else {
+            sb.append("头名 ").append(top.name).append(" ").append(fmt(top.bid)).append("★");
+            if (second > 0L) {
+                long need = (long) Math.ceil(second * mult);
+                sb.append("（距秒仓差 ").append(fmt(Math.max(1L, need - top.bid))).append("★）");
+            }
+            sb.append(" · ");
+            int count = 0;
+            for (Seat s : room.seats) {
+                long cur = s.bids[r - 1];
+                long prev = r >= 2 ? Math.max(0L, s.bids[r - 2]) : 0L;
+                String tag;
+                if (cur <= 0L) {
+                    tag = prev > room.floor ? "高位撤退" : "观望";
+                } else if (cur < room.floor) {
+                    tag = "试探";
+                } else if (prev > 0L && cur >= Math.round(prev * 1.38D)) {
+                    tag = "猛抬逼秒";
+                } else if (prev > 0L && cur < prev) {
+                    tag = "压价控盘";
+                } else {
+                    tag = "稳跟";
+                }
+                if (count++ > 0) sb.append(" / ");
+                sb.append(s.name).append('[').append(tag).append(']');
+            }
+        }
+        String msg = sb.toString();
+        for (Seat s : room.seats) {
+            if (s.human()) s.log(r, 0, "博弈", msg);
+        }
     }
 
     // ================================================================== 开仓结算
 
     private static void finish(MinecraftServer server, BlindRoom room, Seat winner, boolean instant) {
         BlindAuctionSavedData data = BlindAuctionSavedData.get(server);
+        boolean realEconomy = !room.practice && !room.hasAi();
         long truth = room.trueValue();
         long tax = winner == null ? 0L : Math.round(truth * BlindAuctionConfig.CHAMBER_SINK_TAX_RATE.get());
         long bid = winner == null ? 0L : winner.bid;
@@ -570,7 +811,9 @@ public final class BlindVaultEngine {
         boolean defaulted = false;
         Map<Seat, Long> dividends = new HashMap<>();
 
-        if (winner != null && winner.human()) {
+        // 严密经济锁：只有 100% 纯真人联机对局（realEconomy == true）才动真实星币账户；
+        // AI 演练对局或任何含 AI 的房间绝不发放或扣除任何星币！
+        if (realEconomy && winner != null && winner.human()) {
             boolean ok = profit >= 0L
                     ? deposit(winner.uuid, profit, "遗迹盲仓开仓 " + room.zone.title)
                     : withdraw(winner.uuid, -profit, "遗迹盲仓中标结算 " + room.zone.title);
@@ -591,6 +834,10 @@ public final class BlindVaultEngine {
         Placed top = room.items.isEmpty() ? null : Collections.max(room.items, Comparator.comparingLong(Placed::value));
         CompoundTag res = new CompoundTag();
         res.putString("zone", room.zone.title);
+        res.putBoolean("practice", !realEconomy);
+        res.putInt("theme", room.theme.ordinal());
+        res.putInt("comboSet", room.comboSetId);
+        res.putLong("comboBonus", room.comboBonus);
         res.putBoolean("flop", winner == null);
         res.putString("winner", winner == null ? "" : winner.name);
         res.putBoolean("human", winner != null && winner.human());
@@ -620,15 +867,23 @@ public final class BlindVaultEngine {
         room.result = res;
         room.resultTtl = 180;
         for (Seat s : room.seats) {
-            if (s.human()) data.ledgerRemove(s.uuid, s.feePaid);
+            if (s.human() && s.feePaid > 0L) data.ledgerRemove(s.uuid, s.feePaid);
         }
-        data.pushHistory(res);
+        if (realEconomy) {
+            data.pushHistory(res);
+        }
 
+        String prefix = realEconomy ? "【遗迹盲仓】" : "【遗迹盲仓·AI演练】";
+        String suffix = realEconomy ? "" : "（演练局不结算星币）";
+        String comboTxt = room.comboBonus > 0
+                ? "（含「" + BlindCatalog.SET_NAMES[room.comboSetId] + "」共鸣 +" + fmt(room.comboBonus) + " ★）"
+                : "";
         String line = winner == null
-                ? "【遗迹盲仓】" + room.zone.title + " 无人出价，流拍。开仓真实价值 " + fmt(truth) + " ★"
-                : "【遗迹盲仓】" + room.zone.title + "：" + winner.name + (instant ? " 秒仓" : " 第5轮") + "以 " + fmt(bid)
-                        + " ★ 中标，开仓真实价值 " + fmt(truth) + " ★"
-                        + (defaulted ? "（余额不足，违约流拍）" : profit >= 0 ? "，赚 " + fmt(profit) + " ★" : "，亏 " + fmt(-profit) + " ★");
+                ? prefix + room.zone.title + " 无人出价，流拍。开仓真实价值 " + fmt(truth) + " ★" + comboTxt + suffix
+                : prefix + room.zone.title + "：" + winner.name + (instant ? " 秒仓" : " 第5轮") + "以 " + fmt(bid)
+                        + " ★ 中标，开仓真实价值 " + fmt(truth) + " ★" + comboTxt
+                        + (defaulted ? "（余额不足，违约流拍）" : profit >= 0 ? "，模拟净赚 " + fmt(profit) + " ★" : "，模拟净亏 " + fmt(-profit) + " ★")
+                        .replace("模拟净", realEconomy ? "" : "演练") + suffix;
         for (Seat s : room.seats) {
             ServerPlayer sp = s.human() ? server.getPlayerList().getPlayer(s.uuid) : null;
             if (sp != null) sp.displayClientMessage(Component.literal(line), false);
@@ -647,22 +902,34 @@ public final class BlindVaultEngine {
     // ================================================================== 每秒
 
     public static void tickServerSecond(MinecraftServer server) {
+        boolean autoAi = BlindAuctionConfig.MULTIPLAYER_AUTO_AI_FILL.get();
         for (Map.Entry<Integer, Integer> e : new ArrayList<>(QUEUE_WAIT.entrySet())) {
-            int zone = e.getKey();
-            LinkedHashSet<UUID> queue = QUEUES.get(zone);
+            int zoneId = e.getKey();
+            VaultZone zone = VaultZone.byId(zoneId);
+            LinkedHashSet<UUID> queue = QUEUES.get(zoneId);
             if (queue == null || queue.isEmpty()) {
-                QUEUE_WAIT.remove(zone);
+                QUEUE_WAIT.remove(zoneId);
+                continue;
+            }
+            int minHumans = Math.max(2, Math.min(zone.seatCount, BlindAuctionConfig.MIN_MULTIPLAYER_PLAYERS.get()));
+            if (!autoAi && (minHumans >= zone.seatCount || queue.size() < minHumans)) {
+                QUEUE_WAIT.remove(zoneId);
+                syncQueue(server, zoneId);
                 continue;
             }
             int left = e.getValue() - 1;
             if (left <= 0) {
-                List<UUID> players = new ArrayList<>(queue);
-                queue.clear();
-                QUEUE_WAIT.remove(zone);
-                launch(server, VaultZone.byId(zone), players);
+                int take = Math.min(queue.size(), zone.seatCount);
+                List<UUID> players = new ArrayList<>(new ArrayList<>(queue).subList(0, take));
+                players.forEach(queue::remove);
+                QUEUE_WAIT.remove(zoneId);
+                refreshQueueWait(zone, queue);
+                // 若未开启 autoAi，则纯真人开局（fillAi=false, practice=false）；若开启 autoAi，强制按演练局处理防刷钱
+                launch(server, zone, players, autoAi, autoAi);
+                syncQueue(server, zoneId);
             } else {
-                QUEUE_WAIT.put(zone, left);
-                syncQueue(server, zone);
+                QUEUE_WAIT.put(zoneId, left);
+                syncQueue(server, zoneId);
             }
         }
 
@@ -757,6 +1024,11 @@ public final class BlindVaultEngine {
         boolean over = room.phase == Phase.RESULT;
         CompoundTag m = new CompoundTag();
         m.putInt("zone", room.zone.id);
+        m.putBoolean("practice", room.practice || room.hasAi());
+        m.putLong("practiceCap", BlindCatalog.practiceChipCap(room.zone));
+        m.putInt("theme", room.theme.ordinal());
+        m.putInt("comboSet", over || room.round >= 2 ? room.comboSetId : 0);
+        m.putLong("comboBonus", over ? room.comboBonus : 0L);
         m.putInt("round", room.round);
         m.putInt("seconds", Math.max(0, room.seconds));
         m.putLong("floor", room.floor);
@@ -816,7 +1088,7 @@ public final class BlindVaultEngine {
         return m;
     }
 
-    // ================================================================== 经济（只对真人 UUID）
+    // ================================================================== 经济（仅用于纯真人联机）
 
     private static long balance(UUID id) {
         return Math.max(0L, ModuleShopApi.economy().balance(id));

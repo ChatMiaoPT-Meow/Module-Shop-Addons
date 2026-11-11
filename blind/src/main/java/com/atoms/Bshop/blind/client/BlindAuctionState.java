@@ -23,7 +23,8 @@ public final class BlindAuctionState {
 
     public record SeatResult(String name, boolean human, boolean winner, long[] bids, long dividend) {}
 
-    public record Result(String zone, boolean flop, String winner, boolean human, long bid, long truth, long tax,
+    public record Result(String zone, boolean practice, int theme, int comboSet, long comboBonus,
+                         boolean flop, String winner, boolean human, long bid, long truth, long tax,
                          long profit, boolean instant, boolean defaulted, int rounds, String topItem, long topValue,
                          long at, List<SeatResult> seats) {
         static Result of(CompoundTag t) {
@@ -34,10 +35,11 @@ public final class BlindAuctionState {
                 seats.add(new SeatResult(s.getString("n"), s.getBoolean("h"), s.getBoolean("w"), s.getLongArray("bids"),
                         s.getLong("div")));
             }
-            return new Result(t.getString("zone"), t.getBoolean("flop"), t.getString("winner"), t.getBoolean("human"),
-                    t.getLong("bid"), t.getLong("truth"), t.getLong("tax"), t.getLong("profit"), t.getBoolean("instant"),
-                    t.getBoolean("defaulted"), t.getInt("rounds"), t.getString("topItem"), t.getLong("topValue"),
-                    t.getLong("at"), seats);
+            return new Result(t.getString("zone"), t.getBoolean("practice"), t.getInt("theme"),
+                    t.getInt("comboSet"), t.getLong("comboBonus"), t.getBoolean("flop"),
+                    t.getString("winner"), t.getBoolean("human"), t.getLong("bid"), t.getLong("truth"),
+                    t.getLong("tax"), t.getLong("profit"), t.getBoolean("instant"), t.getBoolean("defaulted"),
+                    t.getInt("rounds"), t.getString("topItem"), t.getLong("topValue"), t.getLong("at"), seats);
         }
     }
 
@@ -55,6 +57,11 @@ public final class BlindAuctionState {
     private static int queueSeats = 4;
     private static int queueWait;
 
+    private static boolean matchPractice;
+    private static long practiceCap = 120_000L;
+    private static int vaultTheme;
+    private static int comboSet;
+    private static long comboBonus;
     private static int round = 1;
     private static int seconds;
     private static long floor;
@@ -127,6 +134,12 @@ public final class BlindAuctionState {
                 keypadOpen = false;
                 armedTool = -1;
             }
+            zone = m.contains("zone") ? m.getInt("zone") : zone;
+            matchPractice = m.getBoolean("practice");
+            practiceCap = Math.max(1L, m.getLong("practiceCap"));
+            vaultTheme = m.getInt("theme");
+            comboSet = m.getInt("comboSet");
+            comboBonus = m.getLong("comboBonus");
             round = nextRound;
             seconds = m.getInt("seconds");
             floor = m.getLong("floor");
@@ -201,6 +214,12 @@ public final class BlindAuctionState {
     public static int queueCount() { return queueCount; }
     public static int queueSeats() { return queueSeats; }
     public static int queueWait() { return queueWait; }
+    public static boolean matchPractice() { return matchPractice; }
+    public static long practiceCap() { return practiceCap; }
+    public static long effectiveBidCap() { return matchPractice ? practiceCap : balance; }
+    public static int vaultTheme() { return vaultTheme; }
+    public static int comboSet() { return comboSet; }
+    public static long comboBonus() { return comboBonus; }
     public static int round() { return round; }
     public static int seconds() { return seconds; }
     public static long floor() { return floor; }

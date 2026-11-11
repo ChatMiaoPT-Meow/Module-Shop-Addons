@@ -2,6 +2,7 @@ package com.atoms.Bshop.blind.server;
 
 import com.atoms.Bshop.blind.auction.BlindCatalog;
 import com.atoms.Bshop.blind.auction.BlindCatalog.Relic;
+import com.atoms.Bshop.blind.auction.BlindCatalog.VaultTheme;
 import com.atoms.Bshop.blind.auction.VaultZone;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -9,12 +10,25 @@ import java.util.List;
 import java.util.UUID;
 import net.minecraft.nbt.CompoundTag;
 
-/** 一局盲仓：8×6 仓库里摆着若干占 1–4 格的藏品；4 个席位各有自己的角色、道具次数与情报视野。 */
+/** 一局盲仓：8×6 仓库里摆着若干占 1–4 格的藏品；各席位有自己的角色、道具次数、性格与情报视野。 */
 final class BlindRoom {
     enum Phase { BIDDING, RESULT }
 
-    /** 摆进仓库的一件藏品。 */
-    /** grade：0 正常 / 1 残损 / 2 完美（只有稀有及以上会出现）。 */
+    /** 模拟 AI 的心理博弈性格（复刻暗标竞拍真人常见流派）。 */
+    enum AiPersona {
+        CONSERVATIVE("稳健派"),
+        SNIPER("狙击手"),
+        BLUFFER("做局客"),
+        RAIDER("秒仓猎手");
+
+        final String tag;
+
+        AiPersona(String tag) {
+            this.tag = tag;
+        }
+    }
+
+    /** 摆进仓库的一件藏品。grade：0 正常 / 1 残损 / 2 完美（只有稀有及以上会出现）。 */
     record Placed(int id, Relic relic, int x, int y, long value, int grade) {
         String displayName() {
             return grade == 1 ? "残损·" + relic.name() : grade == 2 ? "完美·" + relic.name() : relic.name();
@@ -45,9 +59,11 @@ final class BlindRoom {
         long bid;
         boolean submitted;
         long submitOrder;
-        // AI：读仓水平（对公开信息推算的偏差）与出价风格
+        // AI：读仓偏差、性格流派与思考延迟
         double aiBias;
         double aiStyle;
+        AiPersona aiPersona = AiPersona.CONSERVATIVE;
+        boolean aiBluffFolded;
         int aiDelay;
 
         Seat(UUID uuid, String name, int role, long feePaid) {
@@ -70,17 +86,22 @@ final class BlindRoom {
             t.putString("b", badge);
             t.putString("m", message);
             logs.add(0, t);
-            while (logs.size() > 16) logs.remove(logs.size() - 1);
+            while (logs.size() > 24) logs.remove(logs.size() - 1);
         }
     }
 
     final int id;
     final VaultZone zone;
+    final boolean practice;
+    final VaultTheme theme;
     final List<Placed> items;
     final int[] owner = new int[BlindCatalog.CELLS];
     /** 系统公开揭示给所有人的已知程度（同 Seat.know）。 */
     final int[] pub;
     final List<Seat> seats = new ArrayList<>();
+    int comboSetId;
+    int comboCount;
+    long comboBonus;
     int round = 1;
     int seconds;
     int elapsed;
@@ -90,9 +111,11 @@ final class BlindRoom {
     int resultTtl;
     CompoundTag result;
 
-    BlindRoom(int id, VaultZone zone, List<Placed> items) {
+    BlindRoom(int id, VaultZone zone, boolean practice, VaultTheme theme, List<Placed> items) {
         this.id = id;
         this.zone = zone;
+        this.practice = practice;
+        this.theme = theme;
         this.items = items;
         this.pub = new int[items.size()];
         Arrays.fill(owner, -1);
@@ -101,12 +124,47 @@ final class BlindRoom {
                 if (p.covers(c)) owner[c] = p.id();
             }
         }
+        computeSetSynergy();
     }
 
-    long trueValue() {
+    private void computeSetSynergy() {
+        int[] counts = new int[BlindCatalog.SET_NAMES.length];
+        for (Placed p : items) {
+            int sid = p.relic().setId();
+            if (sid > 0 && sid < counts.length) {
+                counts[sid]++;
+            }
+        }
+        int bestSet = 0;
+        int bestCnt = 0;
+        for (int sid = 1; sid < counts.length; sid++) {
+            if (counts[sid] >= BlindCatalog.SET_MIN_COUNT && counts[sid] > bestCnt) {
+                bestCnt = counts[sid];
+                bestSet = sid;
+            }
+        }
+        this.comboSetId = bestSet;
+        this.comboCount = bestCnt;
+        this.comboBonus = bestSet > 0
+                ? Math.round(rawItemsValue() * BlindCatalog.SET_BONUS_RATE / 10.0D) * 10L
+                : 0L;
+    }
+
+    boolean hasAi() {
+        for (Seat s : seats) {
+            if (!s.human()) return true;
+        }
+        return false;
+    }
+
+    long rawItemsValue() {
         long sum = 0L;
         for (Placed p : items) sum += p.value();
         return sum;
+    }
+
+    long trueValue() {
+        return rawItemsValue() + comboBonus;
     }
 
     /** 按给定视野推算的最低估值：已知价值按真实价值，已知品质按该品质最低价，其余按普通最低价。 */
@@ -126,6 +184,9 @@ final class BlindRoom {
         for (Placed p : items) {
             int lvl = p.id() < know.length ? know[p.id()] : 0;
             sum += lvl >= 3 ? p.value() : lvl == 2 ? BlindCatalog.tierMean(zone, p.relic().tier()) : unknown;
+        }
+        if (round >= 2 && comboSetId > 0) {
+            sum *= 1.08D;
         }
         return sum;
     }

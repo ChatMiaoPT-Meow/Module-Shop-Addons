@@ -10,6 +10,7 @@ import com.atoms.Bshop.blind.client.BlindAuctionState.Log;
 import com.atoms.Bshop.blind.client.BlindAuctionState.Result;
 import com.atoms.Bshop.blind.client.BlindAuctionState.SeatResult;
 import com.atoms.Bshop.blind.client.BlindAuctionState.SeatView;
+import com.atoms.Bshop.blind.client.ui.BlindSound;
 import com.atoms.Bshop.blind.client.ui.BlindTheme;
 import com.atoms.Bshop.blind.client.ui.Gfx;
 import com.atoms.Bshop.blind.client.ui.Gfx.Align;
@@ -107,7 +108,10 @@ public class BlindVaultRouterView {
         float hbW = 34;
         boolean open = BlindAuctionState.historyOpen();
         button(x + w - hbW, y + 1, hbW, 12, open ? "返回" : "成交记录", open ? Kind.ACCENT : Kind.NORMAL,
-                () -> BlindAuctionState.setHistoryOpen(!BlindAuctionState.historyOpen()));
+                () -> {
+                    BlindSound.pageTurn();
+                    BlindAuctionState.setHistoryOpen(!BlindAuctionState.historyOpen());
+                });
         String bal = "★ " + fmt(BlindAuctionState.balance());
         float balW = Math.min(64, g.width(bal, SMALL, false) + 10);
         g.fill(x + w - hbW - 3 - balW, y + 1, balW, 12, 6, BlindTheme.alpha(BlindTheme.gold(), 0.14F));
@@ -134,7 +138,10 @@ public class BlindVaultRouterView {
                     zx + 21, zy + 18, zw - 24, Align.LEFT, SMALL, false, locked ? BlindTheme.red() : BlindTheme.text3());
             if (hit(zx, zy, zw, 26)) hoverTip = zone.subTitle + " · 风险" + zone.rating + " · 需持有 ≥ " + fmt(zone.minStarCoinReq) + " ★";
             int id = zone.id;
-            click(zx, zy, zw, 26, () -> BlindAuctionNetwork.sendAction(BlindAuctionNetwork.SET_ZONE, id, 0, 0));
+            click(zx, zy, zw, 26, () -> {
+                if (id != BlindAuctionState.zone()) BlindSound.selectOption();
+                BlindAuctionNetwork.sendAction(BlindAuctionNetwork.SET_ZONE, id, 0, 0);
+            });
         }
 
         section(x, y + 38, "② 选择鉴定师（技能按轮次自动生效，只有你看得到）");
@@ -152,7 +159,10 @@ public class BlindVaultRouterView {
             g.text(role.title, rx + 1, ry + 21, rw - 2, Align.CENTER, SMALL, sel, sel ? BlindTheme.accent() : BlindTheme.text());
             if (hov) hoverTip = role.desc;
             int idx = i;
-            click(rx, ry, rw, 28, () -> BlindAuctionNetwork.sendAction(BlindAuctionNetwork.SET_ROLE, idx, 0, 0));
+            click(rx, ry, rw, 28, () -> {
+                if (idx != BlindAuctionState.role()) BlindSound.selectOption();
+                BlindAuctionNetwork.sendAction(BlindAuctionNetwork.SET_ROLE, idx, 0, 0);
+            });
         }
         String d1 = fitPrefix(selRole.desc, w - 4);
         g.text(d1, x + 2, y + 78, w - 4, Align.LEFT, SMALL, false, BlindTheme.text2());
@@ -175,14 +185,22 @@ public class BlindVaultRouterView {
 
         float by = y + h - 19;
         boolean single = BlindAuctionState.single();
-        segment(x, by + 2, 52, "联机匹配", !single, () -> BlindAuctionNetwork.sendAction(BlindAuctionNetwork.SET_SINGLE, 0, 0, 0));
-        segment(x + 54, by + 2, 52, "单人对战AI", single, () -> BlindAuctionNetwork.sendAction(BlindAuctionNetwork.SET_SINGLE, 1, 0, 0));
+        segment(x, by + 2, 52, "联机匹配", !single, () -> {
+            if (single) BlindSound.selectOption();
+            BlindAuctionNetwork.sendAction(BlindAuctionNetwork.SET_SINGLE, 0, 0, 0);
+        });
+        segment(x + 54, by + 2, 52, "AI演练", single, () -> {
+            if (!single) BlindSound.selectOption();
+            BlindAuctionNetwork.sendAction(BlindAuctionNetwork.SET_SINGLE, 1, 0, 0);
+        });
         VaultZone zone = VaultZone.byId(BlindAuctionState.zone());
-        boolean can = balance >= Math.max(zone.minStarCoinReq, zone.entryFee);
-        g.text("门票 " + fmt(zone.entryFee) + " ★", x + 110, by + 8.5F, 70, Align.LEFT, SMALL, true,
+        boolean can = single || balance >= Math.max(zone.minStarCoinReq, zone.entryFee);
+        g.text(single ? "AI演练·免门票不结算星币" : "门票 " + fmt(zone.entryFee) + " ★", x + 110, by + 8.5F, 95, Align.LEFT, SMALL, true,
                 can ? BlindTheme.gold() : BlindTheme.red());
-        button(x + w - 92, by, 92, 17, single ? "开始单人对局" : "开始匹配", can ? Kind.ACCENT : Kind.DISABLED,
-                () -> BlindAuctionNetwork.sendAction(BlindAuctionNetwork.START, 0, 0, 0));
+        button(x + w - 92, by, 92, 17, single ? "开始AI演练" : "开始匹配", can ? Kind.ACCENT : Kind.DISABLED, () -> {
+            BlindSound.startAction();
+            BlindAuctionNetwork.sendAction(BlindAuctionNetwork.START, 0, 0, 0);
+        });
     }
 
     // ================================================================== 匹配
@@ -204,12 +222,14 @@ public class BlindVaultRouterView {
             g.fill(cx + 20 + i * (sw + 3), cy + 58, sw, 5, 2.5F, i < count ? BlindTheme.accent() : BlindTheme.borderDim());
         }
         int wait = BlindAuctionState.queueWait();
-        g.text(wait > 0 ? wait + " 秒后由模拟 AI 补齐空位并开局" : "等待开局…", cx, cy + 73, cw, Align.CENTER, SMALL, false,
+        g.text(wait > 0 ? wait + " 秒后开启纯真人对局" : "等待其他真人玩家加入（不自动补 AI）", cx, cy + 73, cw, Align.CENTER, SMALL, false,
                 BlindTheme.text3());
         g.text("鉴定师：" + Role.byId(BlindAuctionState.role()).title + " · 门票开局时扣除，取消不收费", cx + 6, cy + 86, cw - 12,
                 Align.CENTER, SMALL, false, BlindTheme.text3());
-        button(x + (w - 90) / 2, y + h - 22, 90, 16, "取消匹配", Kind.NORMAL,
-                () -> BlindAuctionNetwork.sendAction(BlindAuctionNetwork.CANCEL_QUEUE, 0, 0, 0));
+        button(x + (w - 90) / 2, y + h - 22, 90, 16, "取消匹配", Kind.NORMAL, () -> {
+            BlindSound.clickBack();
+            BlindAuctionNetwork.sendAction(BlindAuctionNetwork.CANCEL_QUEUE, 0, 0, 0);
+        });
     }
 
     // ================================================================== 竞拍
@@ -287,8 +307,15 @@ public class BlindVaultRouterView {
             click(tx, ty, tw, 14, () -> {
                 if (!usable) return;
                 if (tool.targeted) {
-                    BlindAuctionState.setArmedTool(armed ? -1 : idx);
+                    if (armed) {
+                        BlindSound.cancelTool();
+                        BlindAuctionState.setArmedTool(-1);
+                    } else {
+                        BlindSound.armTool();
+                        BlindAuctionState.setArmedTool(idx);
+                    }
                 } else {
+                    BlindSound.useTool(idx);
                     BlindAuctionNetwork.sendAction(BlindAuctionNetwork.USE_TOOL, idx, -1, 0);
                 }
             });
@@ -305,11 +332,14 @@ public class BlindVaultRouterView {
         } else {
             float half = (centerW - 12) / 2;
             button(cx0 + 4, by, half, 15, "出价", Kind.ACCENT, () -> {
+                BlindSound.selectOption();
                 BlindAuctionState.setArmedTool(-1);
                 BlindAuctionState.openKeypad();
             });
-            button(cx0 + 8 + half, by, half, 15, "本轮放弃", Kind.NORMAL,
-                    () -> BlindAuctionNetwork.sendAction(BlindAuctionNetwork.BID, 0, 0, 0));
+            button(cx0 + 8 + half, by, half, 15, "本轮放弃", Kind.NORMAL, () -> {
+                BlindSound.passRound();
+                BlindAuctionNetwork.sendAction(BlindAuctionNetwork.BID, 0, 0, 0);
+            });
         }
 
         // 右：情报
@@ -347,7 +377,7 @@ public class BlindVaultRouterView {
                 Align.LEFT, SMALL, true, BlindTheme.text());
         boolean hoverX = hit(kx + kw - 14, ky + 2, 12, 12);
         g.text("×", kx + kw - 14, ky + 8, 12, Align.CENTER, BODY, false, hoverX ? BlindTheme.red() : BlindTheme.text3());
-        click(kx + kw - 14, ky + 2, 12, 12, () -> BlindAuctionState.setKeypadOpen(false));
+        click(kx + kw - 14, ky + 2, 12, 12, () -> { BlindSound.clickBack(); BlindAuctionState.setKeypadOpen(false); });
         g.text("你的情报估值 ≥ " + fmt(BlindAuctionState.myFloor()) + " ★ · 提交后锁定", kx + 7, ky + 17, kw - 14, Align.LEFT, SMALL, false, BlindTheme.text3());
 
         long v = BlindAuctionState.keypadValue();
@@ -367,10 +397,12 @@ public class BlindVaultRouterView {
         }
         float botY = ky + kh - 17;
         float half = (kw - 14) / 2;
-        button(kx + 5, botY, half, 14, "取消", Kind.NORMAL, () -> BlindAuctionState.setKeypadOpen(false));
-        boolean ok = v > 0 && v <= BlindAuctionState.balance();
-        button(kx + 9 + half, botY, half, 14, v > BlindAuctionState.balance() ? "余额不足" : "锁定报价",
+        button(kx + 5, botY, half, 14, "取消", Kind.NORMAL, () -> { BlindSound.clickBack(); BlindAuctionState.setKeypadOpen(false); });
+        long cap = BlindAuctionState.effectiveBidCap();
+        boolean ok = v > 0 && v <= cap;
+        button(kx + 9 + half, botY, half, 14, v > cap ? "超出上限" : "锁定报价",
                 ok ? Kind.ACCENT : Kind.DISABLED, () -> {
+                    BlindSound.lockBid();
                     BlindAuctionState.setKeypadOpen(false);
                     BlindAuctionNetwork.sendAction(BlindAuctionNetwork.BID, 0, 0, v);
                 });
@@ -379,11 +411,11 @@ public class BlindVaultRouterView {
     public void handleKey(String key) {
         long v = BlindAuctionState.keypadValue();
         switch (key) {
-            case "退格" -> BlindAuctionState.backspace();
-            case "估值" -> BlindAuctionState.setKeypadValue(BlindAuctionState.myFloor());
-            case "+10%" -> BlindAuctionState.setKeypadValue(v <= 0 ? 0 : Math.max(v + 1, Math.round(v * 1.1D)));
-            case "清零" -> BlindAuctionState.setKeypadValue(0);
-            default -> BlindAuctionState.appendDigits(key);
+            case "退格" -> { BlindSound.keyClear(); BlindAuctionState.backspace(); }
+            case "估值" -> { BlindSound.keyTap(); BlindAuctionState.setKeypadValue(BlindAuctionState.myFloor()); }
+            case "+10%" -> { BlindSound.keyTap(); BlindAuctionState.setKeypadValue(v <= 0 ? 0 : Math.max(v + 1, Math.round(v * 1.1D))); }
+            case "清零" -> { BlindSound.keyClear(); BlindAuctionState.setKeypadValue(0); }
+            default -> { BlindSound.keyTap(); BlindAuctionState.appendDigits(key); }
         }
     }
 
@@ -451,8 +483,10 @@ public class BlindVaultRouterView {
             by += 9.5F;
         }
 
-        button(rx + (rw - 90) / 2, y + h - 21, 90, 15, "返回备战", Kind.ACCENT,
-                () -> BlindAuctionNetwork.sendAction(BlindAuctionNetwork.LEAVE_RESULT, 0, 0, 0));
+        button(rx + (rw - 90) / 2, y + h - 21, 90, 15, "返回备战", Kind.ACCENT, () -> {
+            BlindSound.clickBack();
+            BlindAuctionNetwork.sendAction(BlindAuctionNetwork.LEAVE_RESULT, 0, 0, 0);
+        });
     }
 
     private void row(float x, float y, float w, String label, String value, int color, boolean bold) {
@@ -555,6 +589,7 @@ public class BlindVaultRouterView {
             click(gx, gy, CELL * cols, CELL * rows, () -> {
                 int cx = (int) ((mx - gx) / CELL);
                 int cy = (int) ((my - gy) / CELL);
+                BlindSound.useTool(tool);
                 BlindAuctionState.setArmedTool(-1);
                 BlindAuctionNetwork.sendAction(BlindAuctionNetwork.USE_TOOL, tool, cy * cols + cx, 0);
             });
@@ -657,6 +692,7 @@ public class BlindVaultRouterView {
 
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == 1 && BlindAuctionState.armedTool() >= 0) {
+            BlindSound.cancelTool();
             BlindAuctionState.setArmedTool(-1);
             return true;
         }
@@ -676,24 +712,28 @@ public class BlindVaultRouterView {
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (!BlindAuctionState.isKeypadOpen()) {
             if (keyCode == 256 && BlindAuctionState.armedTool() >= 0) {
+                BlindSound.cancelTool();
                 BlindAuctionState.setArmedTool(-1);
                 return true;
             }
             return false;
         }
         if (keyCode == 259) {
+            BlindSound.keyClear();
             BlindAuctionState.backspace();
             return true;
         }
         if (keyCode == 257 || keyCode == 335) {
             long v = BlindAuctionState.keypadValue();
-            if (v > 0 && v <= BlindAuctionState.balance()) {
+            if (v > 0 && v <= BlindAuctionState.effectiveBidCap()) {
+                BlindSound.lockBid();
                 BlindAuctionState.setKeypadOpen(false);
                 BlindAuctionNetwork.sendAction(BlindAuctionNetwork.BID, 0, 0, v);
             }
             return true;
         }
         if (keyCode == 256) {
+            BlindSound.clickBack();
             BlindAuctionState.setKeypadOpen(false);
             return true;
         }
@@ -702,6 +742,7 @@ public class BlindVaultRouterView {
 
     public boolean charTyped(char codePoint, int modifiers) {
         if (BlindAuctionState.isKeypadOpen() && Character.isDigit(codePoint)) {
+            BlindSound.keyTap();
             BlindAuctionState.appendDigits(String.valueOf(codePoint));
             return true;
         }

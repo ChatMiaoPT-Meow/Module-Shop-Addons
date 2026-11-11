@@ -16,6 +16,7 @@ import com.atoms.Bshop.blind.client.BlindAuctionState.Log;
 import com.atoms.Bshop.blind.client.BlindAuctionState.Result;
 import com.atoms.Bshop.blind.client.BlindAuctionState.SeatResult;
 import com.atoms.Bshop.blind.client.BlindAuctionState.SeatView;
+import com.atoms.Bshop.blind.client.ui.BlindSound;
 import com.atoms.Bshop.blind.client.ui.BlindTheme;
 import com.atoms.Bshop.blind.network.BlindAuctionNetwork;
 import io.github.humbleui.skija.Canvas;
@@ -172,14 +173,20 @@ public final class BlindShopView {
         float hw = V2.buttonWidth(hl) + 6;
         rx -= hw;
         button(hl, history ? V2.Btn.PRIMARY : V2.Btn.NORMAL, rx, by, hw, V2.CTRL,
-                () -> BlindAuctionState.setHistoryOpen(!BlindAuctionState.historyOpen()));
+                () -> {
+                    BlindSound.pageTurn();
+                    BlindAuctionState.setHistoryOpen(!BlindAuctionState.historyOpen());
+                });
         rx -= 4;
         if (received && !history && phase == BlindAuctionState.Phase.RESULT) {
             String rl = tr("tb.leave");
             float rw = V2.buttonWidth(rl) + 6;
             rx -= rw;
             button(rl, V2.Btn.PRIMARY, rx, by, rw, V2.CTRL,
-                    () -> BlindAuctionNetwork.sendAction(BlindAuctionNetwork.LEAVE_RESULT, 0, 0, 0));
+                    () -> {
+                        BlindSound.clickBack();
+                        BlindAuctionNetwork.sendAction(BlindAuctionNetwork.LEAVE_RESULT, 0, 0, 0);
+                    });
             rx -= 4;
         }
         String bal = "★ " + fmt(BlindAuctionState.balance());
@@ -255,6 +262,7 @@ public final class BlindShopView {
         }, hit -> {
             if (hit.row() >= 0 && hit.row() < 3) {
                 int id = hit.row();
+                if (id != BlindAuctionState.zone()) BlindSound.selectOption();
                 BlindAuctionNetwork.sendAction(BlindAuctionNetwork.SET_ZONE, id, 0, 0);
             }
         });
@@ -292,6 +300,7 @@ public final class BlindShopView {
                     descW);
         }, hit -> {
             if (hit.row() >= 0 && hit.row() < Idx.ALL.length) {
+                if (hit.row() != BlindAuctionState.role()) BlindSound.selectOption();
                 BlindAuctionNetwork.sendAction(BlindAuctionNetwork.SET_ROLE, hit.row(), 0, 0);
             }
         });
@@ -303,13 +312,14 @@ public final class BlindShopView {
         float rx = x + lw;
         float rw = w - lw;
         float[][] tc = cols(rx, rw, 8, 5, 40, 50, 0, 28);
+        int toolTotal = Idx.TOOLS.length;
         int toolLines = 1;
-        for (int i = 0; i < 4; i++) toolLines = Math.max(toolLines, wrap(tr("tool." + i + ".desc"), V2.FS_XS, tc[2][1]).size());
+        for (int i = 0; i < toolTotal; i++) toolLines = Math.max(toolLines, wrap(tr("tool." + i + ".desc"), V2.FS_XS, tc[2][1]).size());
         float toolRow = Math.max(15, toolLines * LINE + 5);
-        float toolH = Math.min(V2.HEAD + 4 * toolRow, Math.max(V2.HEAD + 2 * toolRow, lowH * 0.55F));
+        float toolH = Math.min(V2.HEAD + toolTotal * toolRow, Math.max(V2.HEAD + 2 * toolRow, lowH * 0.58F));
         TOOLS_INFO.layout(rx, lowTop, rw, toolH, tc,
                 new String[]{tr("col.tool"), tr("col.desc"), tr("col.kind")}, new Text.Align[]{L, L, R}, null).rowHeight(toolRow);
-        renderTable(TOOLS_INFO, 4, (cv, row, ry, hv) -> {
+        renderTable(TOOLS_INFO, toolTotal, (cv, row, ry, hv) -> {
             float cy = ry + toolRow / 2;
             V2.tag(cv, tr("tool." + row + ".glyph"), ShopTheme.gold(), tc[0][0], cy);
             V2.bold(cv, tr("tool." + row + ".name"), V2.FS_S, ShopTheme.text(), tc[0][0] + 14, cy, tc[0][1] - 14, L);
@@ -347,21 +357,33 @@ public final class BlindShopView {
         for (int i = 0; i < 2; i++) {
             int mode = i;
             region(seg[i][0], by, seg[i][1], V2.CTRL,
-                    () -> BlindAuctionNetwork.sendAction(BlindAuctionNetwork.SET_SINGLE, mode, 0, 0));
+                    () -> {
+                        if ((mode == 1) != BlindAuctionState.single()) BlindSound.selectOption();
+                        BlindAuctionNetwork.sendAction(BlindAuctionNetwork.SET_SINGLE, mode, 0, 0);
+                    });
         }
-        boolean can = balance >= Math.max(sel.minStarCoinReq, sel.entryFee) && !locked;
+        long need = Math.max(sel.minStarCoinReq, sel.entryFee);
+        boolean can = (single || balance >= need) && !locked;
         String startLabel = locked ? tr("start.queued") : single ? tr("start.single") : tr("start.match");
         float sw = V2.buttonWidth(startLabel) + 24;
         float sx = x + w - 8 - sw;
         button(startLabel, can ? V2.Btn.PRIMARY : V2.Btn.DISABLED, sx, by, sw, V2.CTRL,
-                () -> BlindAuctionNetwork.sendAction(BlindAuctionNetwork.START, 0, 0, 0));
+                () -> {
+                    BlindSound.startAction();
+                    BlindAuctionNetwork.sendAction(BlindAuctionNetwork.START, 0, 0, 0);
+                });
         float ix = seg[1][0] + seg[1][1] + 16;
-        long need = Math.max(sel.minStarCoinReq, sel.entryFee);
-        String[][] cells = {
-                {tr("act.zone"), tr("zone." + sel.id + ".name"), null},
-                {tr("act.ticket"), fmt(sel.entryFee) + " ★", "g"},
-                {tr("act.minhold"), fmt(need) + " ★", balance >= need ? "ok" : "bad"},
-                {tr("act.after"), fmt(Math.max(0, balance - sel.entryFee)) + " ★", null}};
+        String[][] cells = single
+                ? new String[][]{
+                        {tr("act.zone"), tr("zone." + sel.id + ".name"), null},
+                        {tr("act.ticket"), tr("act.free"), "ok"},
+                        {tr("act.chips"), fmt(BlindCatalog.practiceChipCap(sel)) + " ★", "g"},
+                        {tr("act.settle"), tr("act.practice_mode"), null}}
+                : new String[][]{
+                        {tr("act.zone"), tr("zone." + sel.id + ".name"), null},
+                        {tr("act.ticket"), fmt(sel.entryFee) + " ★", "g"},
+                        {tr("act.minhold"), fmt(need) + " ★", balance >= need ? "ok" : "bad"},
+                        {tr("act.after"), fmt(Math.max(0, balance - sel.entryFee)) + " ★", null}};
         for (String[] cell : cells) {
             float cw = Math.max(V2.width(cell[0], V2.FS_XS, false), V2.width(cell[1], V2.FS_S, true)) + 6;
             if (ix + cw > sx - 8) break;
@@ -376,7 +398,7 @@ public final class BlindShopView {
                 tr("foot.loadout"));
     }
 
-    private static final int[] TOOL_KIND_COLOR = {0xFF3BA7D9, 0xFF3BA7D9, PURPLE, 0xFF4FB06A};
+    private static final int[] TOOL_KIND_COLOR = {0xFF3BA7D9, 0xFF3BA7D9, PURPLE, 0xFF4FB06A, 0xFFE07A38};
 
     private static String ruleLabel(String key) {
         return switch (key) {
@@ -441,7 +463,10 @@ public final class BlindShopView {
         String cancel = tr("queue.cancel");
         float bw = V2.buttonWidth(cancel) + 20;
         button(cancel, V2.Btn.NORMAL, cx + cw - 10 - bw, cy + ch - V2.CTRL - 5, bw, V2.CTRL,
-                () -> BlindAuctionNetwork.sendAction(BlindAuctionNetwork.CANCEL_QUEUE, 0, 0, 0));
+                () -> {
+                    BlindSound.clickBack();
+                    BlindAuctionNetwork.sendAction(BlindAuctionNetwork.CANCEL_QUEUE, 0, 0, 0);
+                });
         V2.foot(c, x, bottom, w, tr("foot.queue"), null);
     }
 
@@ -499,7 +524,11 @@ public final class BlindShopView {
         drawCenter(cx0, top2, centerW, h2, bottom);
         drawLogs(rx0, top2, rightW, h2);
 
-        if (footLeft == null) footLeft = tr("foot.match", BlindAuctionState.itemCount(), BlindAuctionState.cellCount());
+        if (footLeft == null) {
+            String themeName = tr("theme." + BlindAuctionState.vaultTheme() + ".name");
+            String modeTag = BlindAuctionState.matchPractice() ? tr("m.practice_tag") + " · " : "";
+            footLeft = modeTag + "【" + themeName + "】" + tr("foot.match", BlindAuctionState.itemCount(), BlindAuctionState.cellCount());
+        }
         V2.foot(c, x, bottom, w, footLeft, tr("foot.match.hint"));
     }
 
@@ -532,17 +561,18 @@ public final class BlindShopView {
             tip = s.name() + (s.bids().length == 0 ? "" : " · " + joinBids(s.bids()));
         }
 
-        // 道具栏
-        float toolRow = 15;
+        // 道具栏（5 种探查道具）
+        int toolTotal = Idx.TOOLS.length;
+        float toolRow = 14.5F;
         float toolTop = top + seatH + 2;
-        float toolH = V2.HEAD + 4 * toolRow;
+        float toolH = V2.HEAD + toolTotal * toolRow;
         float[][] tc = cols(lx, lw, 5, 3, 30, 0, 56);
         long used = 0;
-        for (int i = 0; i < 4; i++) if (BlindAuctionState.toolUsed(i)) used++;
-        TOOLS_M.layout(lx, toolTop, lw, toolH, tc, new String[]{tr("col.tool"), tr("tools.used", used, 4)}, new Text.Align[]{L, R},
+        for (int i = 0; i < toolTotal; i++) if (BlindAuctionState.toolUsed(i)) used++;
+        TOOLS_M.layout(lx, toolTop, lw, toolH, tc, new String[]{tr("col.tool"), tr("tools.used", used, toolTotal)}, new Text.Align[]{L, R},
                 null).rowHeight(toolRow);
         boolean toolsLocked = BlindAuctionState.submitted() || BlindAuctionState.toolThisRound();
-        renderTable(TOOLS_M, 4, (cv, row, ry, hv) -> {
+        renderTable(TOOLS_M, toolTotal, (cv, row, ry, hv) -> {
             boolean usedT = BlindAuctionState.toolUsed(row);
             boolean armed = BlindAuctionState.armedTool() == row;
             boolean usable = !usedT && !toolsLocked;
@@ -562,16 +592,23 @@ public final class BlindShopView {
             }
         }, hit -> {
             int i = hit.row();
-            if (i < 0 || i >= 4 || !"act".equals(hit.button())) return;
+            if (i < 0 || i >= toolTotal || !"act".equals(hit.button())) return;
             boolean usedT = BlindAuctionState.toolUsed(i);
             if (usedT || BlindAuctionState.submitted() || BlindAuctionState.toolThisRound()) return;
             if (Idx.TARGETED[i]) {
-                BlindAuctionState.setArmedTool(BlindAuctionState.armedTool() == i ? -1 : i);
+                if (BlindAuctionState.armedTool() == i) {
+                    BlindSound.cancelTool();
+                    BlindAuctionState.setArmedTool(-1);
+                } else {
+                    BlindSound.armTool();
+                    BlindAuctionState.setArmedTool(i);
+                }
             } else {
+                BlindSound.useTool(i);
                 BlindAuctionNetwork.sendAction(BlindAuctionNetwork.USE_TOOL, i, -1, 0);
             }
         });
-        if (inputOpen && TOOLS_M.hoverRow() >= 0 && TOOLS_M.hoverRow() < 4) {
+        if (inputOpen && TOOLS_M.hoverRow() >= 0 && TOOLS_M.hoverRow() < toolTotal) {
             int i = TOOLS_M.hoverRow();
             tip = tr("tool." + i + ".name") + "：" + tr("tool." + i + ".desc");
         }
@@ -644,9 +681,10 @@ public final class BlindShopView {
         bidRect = new float[]{px, py, pw, ph};
         boolean open = BlindAuctionState.isKeypadOpen();
         boolean submitted = BlindAuctionState.submitted();
-        long balance = BlindAuctionState.balance();
+        long balance = BlindAuctionState.effectiveBidCap();
         V2.bold(c, tr("bid.title"), V2.FS_S, ShopTheme.text(), px, py + 5, pw * 0.5F, L);
-        V2.text(c, tr("bid.balance", fmt(balance)), V2.FS_XS, ShopTheme.text3(), px + pw * 0.4F, py + 5, pw * 0.6F, R);
+        String balLabel = BlindAuctionState.matchPractice() ? tr("bid.chips", fmt(balance)) : tr("bid.balance", fmt(balance));
+        V2.text(c, balLabel, V2.FS_XS, ShopTheme.text3(), px + pw * 0.35F, py + 5, pw * 0.65F, R);
 
         float fy = py + 10;
         float fh = 17;
@@ -669,6 +707,7 @@ public final class BlindShopView {
         V2.text(c, "★", V2.FS_S, ShopTheme.text3(), px, fy + fh / 2, pw - 7, R);
         region(px, fy, pw, fh, () -> {
             if (!BlindAuctionState.isKeypadOpen()) {
+                BlindSound.selectOption();
                 BlindAuctionState.setArmedTool(-1);
                 BlindAuctionState.openKeypad();
             }
@@ -688,6 +727,7 @@ public final class BlindShopView {
         boolean ok = open && v > 0 && v <= balance;
         if (!open) {
             button(tr("bid.open"), V2.Btn.PRIMARY, px, ay, half, V2.CTRL, () -> {
+                BlindSound.selectOption();
                 BlindAuctionState.setArmedTool(-1);
                 BlindAuctionState.openKeypad();
             });
@@ -695,8 +735,10 @@ public final class BlindShopView {
             button(v > balance ? tr("bid.nofunds") : tr("bid.lock"), ok ? V2.Btn.PRIMARY : V2.Btn.DISABLED, px, ay, half, V2.CTRL,
                     this::submitBid);
         }
-        button(tr("bid.pass"), V2.Btn.DANGER, px + half + 4, ay, half, V2.CTRL,
-                () -> BlindAuctionNetwork.sendAction(BlindAuctionNetwork.BID, 0, 0, 0));
+        button(tr("bid.pass"), V2.Btn.DANGER, px + half + 4, ay, half, V2.CTRL, () -> {
+            BlindSound.passRound();
+            BlindAuctionNetwork.sendAction(BlindAuctionNetwork.BID, 0, 0, 0);
+        });
     }
 
     private void quick(int k) {
@@ -706,22 +748,33 @@ public final class BlindShopView {
         }
         long v = BlindAuctionState.keypadValue();
         switch (k) {
-            case 0 -> BlindAuctionState.setKeypadValue(v <= 0 ? 0 : Math.max(v + 1, Math.round(v * 1.1D)));
-            case 1 -> BlindAuctionState.setKeypadValue(BlindAuctionState.myFloor());
+            case 0 -> {
+                BlindSound.keyTap();
+                BlindAuctionState.setKeypadValue(v <= 0 ? 0 : Math.max(v + 1, Math.round(v * 1.1D)));
+            }
+            case 1 -> {
+                BlindSound.keyTap();
+                BlindAuctionState.setKeypadValue(BlindAuctionState.myFloor());
+            }
             case 2 -> {
+                BlindSound.keyTap();
                 long last = 0;
                 for (SeatView s : BlindAuctionState.seats()) {
                     if (s.me() && s.bids().length > 0) last = s.bids()[s.bids().length - 1];
                 }
                 BlindAuctionState.setKeypadValue(last);
             }
-            default -> BlindAuctionState.setKeypadValue(0);
+            default -> {
+                BlindSound.keyClear();
+                BlindAuctionState.setKeypadValue(0);
+            }
         }
     }
 
     private void submitBid() {
         long v = BlindAuctionState.keypadValue();
-        if (v > 0 && v <= BlindAuctionState.balance()) {
+        if (v > 0 && v <= BlindAuctionState.effectiveBidCap()) {
+            BlindSound.lockBid();
             BlindAuctionState.setKeypadOpen(false);
             BlindAuctionNetwork.sendAction(BlindAuctionNetwork.BID, 0, 0, v);
         }
@@ -741,6 +794,7 @@ public final class BlindShopView {
             for (int i = 0; i < 3; i++) {
                 int idx = i;
                 region(seg[i][0], top + (barH - V2.CTRL) / 2, seg[i][1], V2.CTRL, () -> {
+                    if (logFilter != idx) BlindSound.selectOption();
                     logFilter = idx;
                     LOGS.scrollToTop();
                 });
@@ -809,6 +863,9 @@ public final class BlindShopView {
                 : res.instant() ? tr("res.instant", res.rounds()) : tr("res.final");
         float hx = x + 8 + tw + 8;
         hx += V2.tag(c, head, res.flop() || res.defaulted() ? ShopTheme.text3() : ShopTheme.gold(), hx, cy);
+        if (res.practice()) {
+            hx += V2.tag(c, tr("res.practice_tag"), ShopTheme.accent(), hx, cy);
+        }
         int zid = zoneIdOf(res.zone());
         String zn = zid >= 0 ? tr("zone." + zid + ".name") : res.zone();
         V2.text(c, zn + " · " + tr("res.summary", BlindAuctionState.itemCount(), BlindAuctionState.cellCount(), BlindCatalog.CELLS),
@@ -876,13 +933,19 @@ public final class BlindShopView {
             yy = settle(rx, yy, rw, tr("res.bid"), fmt(res.bid()) + " ★", ShopTheme.gold(), true);
         }
         yy = settle(rx, yy, rw, tr("res.truth"), fmt(res.truth()) + " ★", ShopTheme.text(), false);
+        if (res.comboBonus() > 0 && res.comboSet() > 0) {
+            yy = settle(rx, yy, rw, tr("res.combo", tr("set." + res.comboSet())), "+" + fmt(res.comboBonus()) + " ★", PURPLE, false);
+        }
         if (!res.flop()) {
             yy = settle(rx, yy, rw, tr("res.tax", pctD(BlindAuctionState.tax())), "−" + fmt(res.tax()) + " ★", ShopTheme.text3(), false);
             boolean up = res.profit() >= 0;
             float bh = 22;
             Draw.fill(c, rx + 8, yy + 2, rw - 16, bh, V2.R, BlindTheme.alpha(res.defaulted() ? ShopTheme.text3() : up ? ShopTheme.red() : ShopTheme.green(), 0.14F));
-            V2.text(c, res.defaulted() ? tr("res.nodeal") : up ? tr("res.up") : tr("res.down"), V2.FS_S, ShopTheme.text2(), rx + 14,
-                    yy + 2 + bh / 2, rw * 0.4F, L);
+            String pnlTag = res.defaulted() ? tr("res.nodeal")
+                    : res.practice() ? (up ? tr("res.up.practice") : tr("res.down.practice"))
+                    : (up ? tr("res.up") : tr("res.down"));
+            V2.text(c, pnlTag, V2.FS_S, ShopTheme.text2(), rx + 14,
+                    yy + 2 + bh / 2, rw * 0.46F, L);
             V2.bold(c, V2.signed(res.profit()) + " ★", V2.FS_T, res.defaulted() ? ShopTheme.text3() : up ? ShopTheme.red() : ShopTheme.green(),
                     rx + rw * 0.3F, yy + 2 + bh / 2, rw * 0.7F - 14, R);
             yy += bh + 6;
@@ -1097,6 +1160,7 @@ public final class BlindShopView {
             region(gx, gy, cell * cols, cell * rows, () -> {
                 int cx = (int) ((clickX - fgx) / fcell);
                 int cy = (int) ((clickY - fgy) / fcell);
+                BlindSound.useTool(tool);
                 BlindAuctionState.setArmedTool(-1);
                 BlindAuctionNetwork.sendAction(BlindAuctionNetwork.USE_TOOL, tool, cy * BlindCatalog.COLS + cx, 0);
             });
@@ -1118,6 +1182,7 @@ public final class BlindShopView {
 
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == 1 && BlindAuctionState.armedTool() >= 0) {
+            BlindSound.cancelTool();
             BlindAuctionState.setArmedTool(-1);
             return true;
         }
@@ -1180,12 +1245,14 @@ public final class BlindShopView {
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (!BlindAuctionState.isKeypadOpen()) {
             if (keyCode == 256 && BlindAuctionState.armedTool() >= 0) {
+                BlindSound.cancelTool();
                 BlindAuctionState.setArmedTool(-1);
                 return true;
             }
             return false;
         }
         if (keyCode == 259) {
+            BlindSound.keyClear();
             BlindAuctionState.backspace();
             return true;
         }
@@ -1194,6 +1261,7 @@ public final class BlindShopView {
             return true;
         }
         if (keyCode == 256) {
+            BlindSound.clickBack();
             BlindAuctionState.setKeypadOpen(false);
             return true;
         }
@@ -1202,6 +1270,7 @@ public final class BlindShopView {
 
     public boolean charTyped(char codePoint, int modifiers) {
         if (BlindAuctionState.isKeypadOpen() && Character.isDigit(codePoint)) {
+            BlindSound.keyTap();
             BlindAuctionState.appendDigits(String.valueOf(codePoint));
             return true;
         }
@@ -1393,9 +1462,11 @@ public final class BlindShopView {
     /** 鉴定师 / 道具的静态索引（文字走 lang，这里只放结构信息）。 */
     private static final class Idx {
         static final BlindCatalog.Role[] ALL = BlindCatalog.Role.values();
-        static final boolean[] TARGETED = {
-                BlindCatalog.Tool.HAMMER.targeted, BlindCatalog.Tool.LENS.targeted,
-                BlindCatalog.Tool.SCANNER.targeted, BlindCatalog.Tool.GLOWSTICK.targeted};
+        static final BlindCatalog.Tool[] TOOLS = BlindCatalog.Tool.values();
+        static final boolean[] TARGETED = new boolean[TOOLS.length];
+        static {
+            for (int i = 0; i < TOOLS.length; i++) TARGETED[i] = TOOLS[i].targeted;
+        }
 
         private Idx() {
         }

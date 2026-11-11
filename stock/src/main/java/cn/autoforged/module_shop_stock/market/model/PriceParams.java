@@ -12,37 +12,53 @@ public final class PriceParams {
 
     // ---- 瞬时波动率 σ（EWMA / 半 Heston）----
     /** σ 回归目标的强度（每小时）。 */
-    public double kappaSigmaPerHour = 2.5D;
+    public double kappaSigmaPerHour = 2.2D;
     /** σ 自身噪声（相对）。 */
-    public double xiSigma = 0.45D;
+    public double xiSigma = 0.48D;
     /** 已实现大跳动后抬高 σ 的系数。 */
-    public double realizedBump = 0.01D;
+    public double realizedBump = 0.02D;
     /** 触发"已实现抬升"的阈值：|r| > 阈值 × σ_target × √dt。 */
-    public double realizedThreshold = 3.0D;
-    public double sigmaMinRatio = 0.45D;
-    public double sigmaMaxRatio = 2.2D;
+    public double realizedThreshold = 2.4D;
+    /** 瞬时波动率下限比例（抬高至 0.65，防止个股跌入数十分钟的死水横盘）。 */
+    public double sigmaMinRatio = 0.65D;
+    public double sigmaMaxRatio = 2.20D;
 
-    // ---- 趋势 μ（OU，每小时对数漂移）----
-    public double kappaTrendPerHour = 1.2D;
-    /** 趋势噪声 = 该比例 × σ_target（每√小时）。 */
-    public double sigmaTrendRatio = 1.0D;
-    public double themeProbPerHour = 0.08D;
-    /** 主题行情强度 = 该比例 × σ_target。 */
-    public double themeJumpRatio = 0.8D;
-    public double muCap = 0.045D;
+    // ---- 日内波段动量 μ（朗之万订单流 OU，特征波段时长约 15～20 分钟）----
+    public double kappaTrendPerHour = 3.2D;
+    /** 波段订单流激励强度 = 该比例 × 有效小时波动（每√小时）。 */
+    public double sigmaTrendRatio = 3.5D;
+    /** 每小时触发一次波段突破（主题推力）的概率。 */
+    public double themeProbPerHour = 1.20D;
+    /** 波段突破推力强度 = 该比例 × 有效小时波动。 */
+    public double themeJumpRatio = 1.90D;
+    /** 波段趋势（每小时对数漂移）基准绝对值上限。 */
+    public double muCap = 0.16D;
 
     // ---- 公允价 F ----
-    public double kappaFairPerHour = 0.15D;
-    public double fairFollow = 0.35D;
-    /** 每 tick 扩散冲击中直接进入公允价的比例（价格创新是"永久"的那一部分）。 */
-    public double fairShockShare = 0.8D;
+    public double kappaFairPerHour = 0.10D;
+    /** 波段趋势直接传导进公允价的比例（避免趋势与均值回归互相抵消）。 */
+    public double fairFollow = 0.94D;
+    /** 每 tick 扩散冲击中永久计入公允价的比例。 */
+    public double fairShockShare = 0.92D;
 
-    // ---- 现价 S ----
-    public double meanReversionPerHour = 0.8D;
+    // ---- 现价 S 与整数星币低价股联动 ----
+    public double meanReversionPerHour = 0.60D;
+    /** 直接进入单 tick 随机扩散的波动份额（其余方差由波段动量 μ 承载，使 1 分线走出连贯波段而非原地毛刺）。 */
+    public double diffusionShare = 0.70D;
     public double jumpProbPerHour = 0.15D;
     /** 跳空标准差 = 该比例 × σ（每小时 σ，不随 dt 缩放）。 */
-    public double jumpScale = 0.6D;
+    public double jumpScale = 0.55D;
     public double tickMoveCap = 0.025D;
+    /**
+     * 1 分钟有效扩散的星币标准差下限（整数星币防死区）。
+     * 低价股不足该下限时，按 {@link #barFairShare} 同步放大公允价与波段趋势，避免现价独自放大后围着静止公允价原地锯齿横盘。
+     * 0 = 关闭；本身已超过该幅度的中高价股不放大。
+     */
+    public double barMoveCoins = 0.78D;
+    /** 低价补偿倍率传导至公允价与波段动量的指数份额（0～1）。 */
+    public double barFairShare = 0.82D;
+    /** 低价补偿传导至公允价与波段动量的最大倍率上限（保证 24h 日限触碰率温和）。 */
+    public double barFairMaxScale = 3.20D;
 
     // ---- 日限 ----
     public double dayLimitPct = 0.12D;
@@ -75,7 +91,7 @@ public final class PriceParams {
     public double spreadCoef = 1.3D;
     /** 价差对应 σ 的观察窗口（小时）。1/60 = 1 分钟。 */
     public double spreadHorizonHours = 1.0D / 60.0D;
-    public double skewMuCoef = 6.0D;
+    public double skewMuCoef = 2.5D;
     public double skewGapCoef = 8.0D;
     public double skewCap = 0.25D;
     /** 吃穿五档后，剩余量按最远一档再滑点的比例。 */
@@ -110,9 +126,13 @@ public final class PriceParams {
         c.fairFollow = fairFollow;
         c.fairShockShare = fairShockShare;
         c.meanReversionPerHour = meanReversionPerHour;
+        c.diffusionShare = diffusionShare;
         c.jumpProbPerHour = jumpProbPerHour;
         c.jumpScale = jumpScale;
         c.tickMoveCap = tickMoveCap;
+        c.barMoveCoins = barMoveCoins;
+        c.barFairShare = barFairShare;
+        c.barFairMaxScale = barFairMaxScale;
         c.dayLimitPct = dayLimitPct;
         c.softLimitStart = softLimitStart;
         c.softLimitFloor = softLimitFloor;

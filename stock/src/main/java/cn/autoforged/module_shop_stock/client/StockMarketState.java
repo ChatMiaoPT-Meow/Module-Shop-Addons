@@ -20,10 +20,14 @@ import net.minecraft.network.chat.Component;
 /** 客户端缓存：24+ 股票定义、五档买卖盘口、多空双向持仓、委托、自动快讯与 K 线滚轮缩放状态。 */
 public final class StockMarketState {
     public static final int DEFAULT_ZOOM_BARS = 60;
-    /** 日/周周期的默认可见根数。 */
+    /** 60m 时线的默认可见根数（约 2 天）。 */
+    public static final int DEFAULT_HOURLY_ZOOM_BARS = 48;
+    /** 日周期的默认可见根数。 */
     public static final int DEFAULT_CALENDAR_ZOOM_BARS = 60;
+    /** 周周期的默认可见根数。 */
+    public static final int DEFAULT_WEEKLY_ZOOM_BARS = 36;
     public static final int MIN_ZOOM_BARS = 8;
-    public static final int MAX_ZOOM_BARS = 120;
+    public static final int MAX_ZOOM_BARS = 180;
     public static final int BOOK_LEVELS = 5;
 
     public static final class Def {
@@ -341,25 +345,93 @@ public final class StockMarketState {
         resetZoom();
     }
 
-    public static void zoomChart(double wheelAmount) {
-        if (wheelAmount == 0.0D) {
-            return;
+    /** 各周期的自然默认可见根数。 */
+    public static int defaultZoomFor(BarPeriod p) {
+        if (p == null) {
+            return DEFAULT_ZOOM_BARS;
         }
-        double factor = wheelAmount > 0.0D ? 0.82D : 1.22D;
-        int next = (int) Math.round(targetZoomBars * factor);
-        if (next == targetZoomBars) {
-            next += wheelAmount > 0.0D ? -2 : 2;
-        }
-        targetZoomBars = Math.max(MIN_ZOOM_BARS, Math.min(MAX_ZOOM_BARS, next));
+        return switch (p) {
+            case H1 -> DEFAULT_HOURLY_ZOOM_BARS;
+            case W1 -> DEFAULT_WEEKLY_ZOOM_BARS;
+            case D1 -> DEFAULT_CALENDAR_ZOOM_BARS;
+            default -> DEFAULT_ZOOM_BARS;
+        };
     }
 
-    /** 切换 K 线周期：回到最新、缩放重置为该周期默认值（分钟 32 根，日/周 60 根）；图表数据留待服务端按新周期重发。 */
+    /** 当前图表允许的最小可见根数（兼容极短历史存档，避免柱数少于 8 根时完全无法缩放）。 */
+    public static int effectiveMinZoomBars() {
+        int n = chart.time.length;
+        if (n <= 0) {
+            return MIN_ZOOM_BARS;
+        }
+        return Math.min(MIN_ZOOM_BARS, Math.max(2, n / 2));
+    }
+
+    /** 当前图表允许的最大可见根数：严格受限于实际已加载柱数，彻底消除超出柱数后的滚轮空转死区。 */
+    public static int effectiveMaxZoomBars() {
+        int n = chart.time.length;
+        if (n <= 0) {
+            return MAX_ZOOM_BARS;
+        }
+        return Math.max(effectiveMinZoomBars(), Math.min(MAX_ZOOM_BARS, n));
+    }
+
+    /** 当前帧实际生效的可见柱数。 */
+    public static int effectiveVisibleBars() {
+        int min = effectiveMinZoomBars();
+        int max = effectiveMaxZoomBars();
+        return Math.max(min, Math.min(max, Math.round(zoomBars)));
+    }
+
+    public static void zoomChart(double wheelAmount) {
+        zoomChart(wheelAmount, 1.0D);
+    }
+
+    /**
+     * 按鼠标滚轮无死区缩放 K 线；{@code anchorRatio} 为鼠标在绘图区的水平位置比例 [0, 1]，
+     * 回看历史（panBars > 0）时保持光标所指 K 线位置稳定，在最新右沿（panBars == 0）时固定贴住最新柱。
+     */
+    public static void zoomChart(double wheelAmount, double anchorRatio) {
+        if (wheelAmount == 0.0D || Double.isNaN(wheelAmount)) {
+            return;
+        }
+        int min = effectiveMinZoomBars();
+        int max = effectiveMaxZoomBars();
+        int base = chart.isEmpty() ? targetZoomBars : Math.max(min, Math.min(max, targetZoomBars));
+        if (max <= min) {
+            targetZoomBars = max;
+            zoomBars = max;
+            return;
+        }
+        double steps = Math.max(-4.0D, Math.min(4.0D, wheelAmount));
+        double factor = Math.pow(0.82D, steps);
+        int next = (int) Math.round(base * factor);
+        if (next == base) {
+            next += wheelAmount > 0.0D ? -1 : 1;
+        }
+        next = Math.max(min, Math.min(max, next));
+
+        int total = chart.time.length;
+        if (!chart.isEmpty() && panBars > 0 && next != base) {
+            double ratio = Math.max(0.0D, Math.min(1.0D, anchorRatio));
+            int oldEnd = Math.max(1, total - panBars);
+            int oldFirst = Math.max(0, oldEnd - base);
+            int oldBars = Math.max(1, oldEnd - oldFirst);
+            double focusIndex = oldFirst + ratio * oldBars;
+            int newEnd = (int) Math.round(focusIndex + (1.0D - ratio) * next);
+            int maxPan = Math.max(0, total - next);
+            panBars = Math.max(0, Math.min(maxPan, total - newEnd));
+        }
+        targetZoomBars = next;
+    }
+
+    /** 切换 K 线周期：回到最新、缩放重置为该周期默认值；图表回包后自动按真实柱数收紧上界。 */
     public static void setPeriod(BarPeriod next) {
         if (next == null || next == period || legacyServer) {
             return;
         }
         period = next;
-        int zoom = next.isCalendar() ? DEFAULT_CALENDAR_ZOOM_BARS : DEFAULT_ZOOM_BARS;
+        int zoom = defaultZoomFor(next);
         targetZoomBars = zoom;
         zoomBars = zoom;
         panBars = 0;
@@ -371,13 +443,18 @@ public final class StockMarketState {
     }
 
     public static void resetZoom() {
-        targetZoomBars = DEFAULT_ZOOM_BARS;
-        zoomBars = DEFAULT_ZOOM_BARS;
+        int defZoom = defaultZoomFor(period);
+        int clamped = chart.isEmpty() ? defZoom
+                : Math.max(effectiveMinZoomBars(), Math.min(effectiveMaxZoomBars(), defZoom));
+        targetZoomBars = clamped;
+        zoomBars = clamped;
         panBars = 0;
     }
 
     public static float zoomRatio() {
-        return DEFAULT_ZOOM_BARS / Math.max(1.0F, zoomBars);
+        int defZoom = defaultZoomFor(period);
+        int base = chart.isEmpty() ? defZoom : Math.max(1, Math.min(defZoom, chart.time.length));
+        return base / (float) Math.max(1, effectiveVisibleBars());
     }
 
     public static boolean hasActiveNews() {
@@ -905,10 +982,19 @@ public final class StockMarketState {
         next.close = java.util.Arrays.copyOf(close, n);
         next.volume = java.util.Arrays.copyOf(volume, n);
         next.seeded = seededOf(tag, n);
-        if (!next.symbol.equals(chart.symbol) || next.period != chart.period) {
-            panBars = 0;
-        }
+        boolean switched = !next.symbol.equals(chart.symbol) || next.period != chart.period;
         chart = next;
+        int minZ = effectiveMinZoomBars();
+        int maxZ = effectiveMaxZoomBars();
+        if (switched) {
+            panBars = 0;
+            int defZ = Math.max(minZ, Math.min(maxZ, defaultZoomFor(next.period)));
+            targetZoomBars = defZ;
+            zoomBars = defZ;
+        } else {
+            targetZoomBars = Math.max(minZ, Math.min(maxZ, targetZoomBars));
+            zoomBars = Math.max(minZ, Math.min(maxZ, zoomBars));
+        }
         Quote q = QUOTES.get(next.symbol);
         if (q != null && tag.contains("bp")) {
             copyBookArray(tag.getLongArray("bp"), q.bidPrices);

@@ -16,7 +16,9 @@ import java.util.Random;
  */
 public final class BarHistorySeeder {
     /** 日线补到的根数。 */
-    public static final int DAILY_BARS = 60;
+    public static final int DAILY_BARS = 120;
+    /** 时线（60m）补到的最少根数（5 天 = 120 根，同源聚合至 15m/5m），保证分线/时线也能自由缩放回看。 */
+    public static final int HOURLY_BARS = 120;
     /** 周线由更长的日路径聚合得到（26 周），保证日/周两张图同源。 */
     public static final int WEEKLY_DAYS = 182;
     /** 日振幅（开到高/低/收）夹紧到 ±12%。 */
@@ -92,6 +94,137 @@ public final class BarHistorySeeder {
             weekly.prepend(weeks);
         }
         return dailyPart.size();
+    }
+
+
+    /**
+     * 给 5m / 15m / 60m 补齐风格化日内粗周期种子（带 {@link Bar#seeded} 标记），
+     * 解决新档 1m 仅覆盖 24 小时（时线仅 24 根）或旧档升档后分线/时线柱数过少、滚轮无法大幅缩放的问题。
+     * 只在现有最老柱之前向前补，绝不覆盖真实 K 线。
+     */
+    public static int seedIntradayCoarse(BarAggregator book, long nowSecond, long fallbackPrice, long basePrice,
+            double volatility, long typicalDailyVolume, long seed) {
+        BarSeries h1 = book.series(BarPeriod.H1);
+        if (h1.size() >= HOURLY_BARS) {
+            return 0;
+        }
+        ZoneId zone = book.zone();
+        BarSeries m5 = book.series(BarPeriod.M5);
+        BarSeries m15 = book.series(BarPeriod.M15);
+
+        long anchorTime;
+        long anchorPrice;
+        if (!m5.isEmpty()) {
+            Bar oldest = m5.get(0);
+            anchorTime = oldest.time;
+            anchorPrice = oldest.open;
+        } else if (!h1.isEmpty()) {
+            Bar oldest = h1.get(0);
+            anchorTime = oldest.time;
+            anchorPrice = oldest.open;
+        } else {
+            anchorTime = BarPeriod.M5.start(nowSecond, 60, zone);
+            anchorPrice = fallbackPrice;
+        }
+
+        int needHours = Math.max(24, HOURLY_BARS - h1.size() + 2);
+        int count5m = needHours * 12;
+        long end5m = anchorTime - 300L;
+        List<Bar> path5m = generateFiveMinutePath(end5m, Math.max(1L, anchorPrice), Math.max(1L, basePrice),
+                volatility, Math.max(288L, typicalDailyVolume) / 288L, seed ^ 0x517CC1B727220A95L, count5m);
+
+        int addedH1 = prependAggregated(path5m, m5, BarPeriod.M5, zone);
+        prependAggregated(path5m, m15, BarPeriod.M15, zone);
+        addedH1 = prependAggregated(path5m, h1, BarPeriod.H1, zone);
+        return addedH1;
+    }
+
+    private static int prependAggregated(List<Bar> source5m, BarSeries target, BarPeriod period, ZoneId zone) {
+        if (source5m.isEmpty() || target.size() >= target.limit()) {
+            return 0;
+        }
+        long firstExisting = target.isEmpty() ? Long.MAX_VALUE : target.get(0).time;
+        List<Bar> built = new ArrayList<>();
+        Bar current = null;
+        for (Bar b : source5m) {
+            long start = period == BarPeriod.M5 ? b.time : period.start(b.time, 60, zone);
+            if (start >= firstExisting) {
+                continue;
+            }
+            if (current == null || start > current.time) {
+                if (current != null) {
+                    built.add(current);
+                }
+                current = new Bar(start, b.open, b.high, b.low, b.close, b.volume);
+                current.seeded = true;
+            } else {
+                current.high = Math.max(current.high, b.high);
+                current.low = Math.min(current.low, b.low);
+                current.close = b.close;
+                current.volume += b.volume;
+            }
+        }
+        if (current != null) {
+            built.add(current);
+        }
+        int room = Math.max(0, target.limit() - target.size());
+        if (built.size() > room) {
+            built = new ArrayList<>(built.subList(built.size() - room, built.size()));
+        }
+        if (!built.isEmpty()) {
+            target.prepend(built);
+        }
+        return built.size();
+    }
+
+    private static List<Bar> generateFiveMinutePath(long end5m, long anchor, long basePrice, double volatility,
+            long typical5mVol, long seed, int count) {
+        Random rng = new Random(seed);
+        double sigma5m = Math.max(0.0025D, Math.min(0.016D, dailySigma(volatility) / Math.sqrt(48.0D)));
+        double logBase = Math.log(Math.max(1.0D, basePrice));
+        double lo = logBase + Math.log(0.45D);
+        double hi = logBase + Math.log(2.20D);
+        double maxStep = 0.035D;
+        double kappa = 0.004D;
+
+        double[] x = new double[count + 1];
+        x[count] = Math.log(Math.max(1.0D, anchor));
+        double wave = 0.0D;
+        for (int k = count; k >= 1; k--) {
+            wave = 0.88D * wave + sigma5m * 0.45D * rng.nextGaussian();
+            double step = kappa * (logBase - x[k]) + wave + sigma5m * 0.85D * rng.nextGaussian();
+            step = Math.max(-maxStep, Math.min(maxStep, step));
+            double open = x[k] + step;
+            x[k - 1] = x[k] >= lo && x[k] <= hi ? Math.max(lo, Math.min(hi, open)) : open;
+        }
+
+        List<Bar> out = new ArrayList<>(count);
+        for (int k = 1; k <= count; k++) {
+            double o = Math.exp(x[k - 1]);
+            double c = Math.exp(x[k]);
+            double top = Math.max(o, c);
+            double bottom = Math.min(o, c);
+            double up = top * sigma5m * (0.20D + Math.abs(rng.nextGaussian()) * 0.65D);
+            double dn = bottom * sigma5m * (0.20D + Math.abs(rng.nextGaussian()) * 0.65D);
+            long openL = Math.max(1L, Math.round(o));
+            long closeL = Math.max(1L, Math.round(c));
+            long highL = Math.max(Math.max(openL, closeL), Math.round(top + up));
+            long lowL = Math.max(1L, Math.min(Math.min(openL, closeL), Math.round(bottom - dn)));
+            double move = Math.abs(x[k] - x[k - 1]);
+            long vol = Math.max(1L, Math.round(Math.max(5L, typical5mVol) * (0.55D + rng.nextDouble() * 0.90D)
+                    * (1.0D + 12.0D * move)));
+            long t = end5m - (long) (count - k) * 300L;
+            Bar bar = new Bar(t, openL, highL, lowL, closeL, vol);
+            bar.seeded = true;
+            out.add(bar);
+        }
+        if (!out.isEmpty()) {
+            Bar last = out.get(out.size() - 1);
+            last.close = Math.max(1L, anchor);
+            last.high = Math.max(last.high, last.close);
+            last.low = Math.min(last.low, last.close);
+        }
+        return out;
     }
 
     /**

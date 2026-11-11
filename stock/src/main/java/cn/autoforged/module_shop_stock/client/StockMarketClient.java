@@ -5,10 +5,10 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
-import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
+import net.neoforged.neoforge.common.NeoForge;
 
-/** 客户端入口：注册商店内容页、原版回退界面与网络回包。 */
+/** 客户端入口：注册商店内容页、原版回退界面、网络回包与可选实机自动截屏巡检器。 */
 public final class StockMarketClient {
     public static final String MODULE_ID = "module_shop_stock";
 
@@ -22,6 +22,9 @@ public final class StockMarketClient {
                         StockMarketPage::new,
                         StockMarketFallbackScreen::new)));
         NeoForge.EVENT_BUS.addListener((ClientPlayerNetworkEvent.LoggingOut event) -> StockMarketState.reset());
+        if (StockRealTour.enabled()) {
+            NeoForge.EVENT_BUS.addListener(StockRealTour::onClientTick);
+        }
     }
 
     public static void handle(CompoundTag tag) {

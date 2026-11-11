@@ -6,10 +6,10 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * 价格模型 v3：对数 OU 公允价 + EWMA 随机波动率 + 日限/长期带护栏（纯 Java，无 Minecraft 依赖）。
+ * 价格模型 v3（波段动量增强版）：朗之万订单流波段 + 对数 OU 公允价 + EWMA 随机波动率 + 日限协同护栏（纯 Java，无 Minecraft 依赖）。
  *
  * <p>单票单 tick 的全部数学都在 {@link #step}。{@code MarketEngine} 只负责把 {@code Quote} 与配置适配进来。
- * 价格全程用 double 保存（便宜股单 tick 变动远小于 1 星币，取整会吃掉全部演化），对外展示价由调用方取整。
+ * 价格全程用 double 保存（整数星币对外展示由调用方取整），同时通过公允价-现价协同缩放消除 1 分线长时间死水横盘与涨跌停贴线粘滞。
  */
 public final class PriceModelV3 {
     private PriceModelV3() {
@@ -23,11 +23,11 @@ public final class PriceModelV3 {
         public double fair;
         /** 瞬时波动率（每√小时，对数）。 */
         public double sigma;
-        /** 趋势（每小时对数漂移）。 */
+        /** 波段订单流趋势（每小时对数漂移）。 */
         public double mu;
         /** 新闻残余标记（仅衰减展示，不乘进波动）。 */
         public double newsBoost;
-        /** 上一 tick 已实现的对数收益（不持久化）。 */
+        /** 上一 tick 已实现的经济对数收益（不持久化）。 */
         public double lastRet;
 
         public State() {
@@ -130,7 +130,7 @@ public final class PriceModelV3 {
         final double target = Math.max(1e-6D, env.sigmaBase * env.session);
         sanitize(s, env, target);
 
-        // 1) 瞬时波动率 σ
+        // 1) 瞬时波动率 σ（带活跃下限，避免长时间进入低波死水期）
         double sg = s.sigma;
         sg += p.kappaSigmaPerHour * (target - sg) * dtH + p.xiSigma * sg * rng.nextGaussian() * sq;
         double absRet = Math.abs(s.lastRet);
@@ -138,65 +138,137 @@ public final class PriceModelV3 {
             // realizedBump 以 5 秒 tick 为基准，按 dt 折算，保证改 updateIntervalSeconds 后统计性质不变
             sg += p.realizedBump * (p.dtSec / 5.0D) * (absRet / sq - target);
         }
-        sg = clamp(sg, p.sigmaMinRatio * target, p.sigmaMaxRatio * target);
-        s.sigma = sg;
 
-        // 2) 趋势 μ（OU，不硬切；偶发温和主题）
+        // 低价整数股联动倍率：现价按 bScale 保证 1 分钟跨过整数死区，公允价与波段趋势同步获得 fScale，
+        // 让低价股也能走出跨多格整数的真实波段，而不是围着静止公允价原地锯齿拉锯。
+        double bScale = barScale(p, s.price, sg);
+        double fScale = fairScale(p, bScale);
+        double effTarget = target * fScale;
+
+        // 2) 日内订单流波段趋势 μ（朗之万 OU + 周期性突破催化；贴近日限时倾向反向回落而非贴死涨跌停线）
         double mu = s.mu * Math.exp(-p.kappaTrendPerHour * dtH)
-                + p.sigmaTrendRatio * target * rng.nextGaussian() * sq;
+                + p.sigmaTrendRatio * effTarget * rng.nextGaussian() * sq;
         if (rng.nextDouble() < p.themeProbPerHour * dtH) {
-            mu += (rng.nextBoolean() ? 1.0D : -1.0D) * p.themeJumpRatio * target;
+            double bias = 0.0D;
+            if (env.dayRef > 0.0D && p.dayLimitPct > 0.0D) {
+                bias = clamp((s.price - env.dayRef) / (env.dayRef * p.dayLimitPct), -1.0D, 1.0D);
+            }
+            double upProb = 0.5D - 0.40D * bias;
+            double sign = rng.nextDouble() < upProb ? 1.0D : -1.0D;
+            mu += sign * p.themeJumpRatio * effTarget;
+            sg += 0.08D * target;
         }
-        mu = clamp(mu, -p.muCap, p.muCap);
+        sg = clamp(sg, p.sigmaMinRatio * target, p.sigmaMaxRatio * target);
+
+        if (env.dayRef > 0.0D && p.dayLimitPct > 0.0D) {
+            double devNow = (s.price - env.dayRef) / env.dayRef;
+            if (devNow * mu > 0.0D && Math.abs(devNow) / p.dayLimitPct > 0.68D) {
+                mu *= Math.exp(-6.0D * dtH);
+            }
+        }
+        double muLim = Math.min(0.28D, p.muCap * fScale);
+        mu = clamp(mu, -muLim, muLim);
+        s.sigma = sg;
         s.mu = mu;
 
-        // 3) 现价扩散冲击（+ 稀疏跳空）
-        double diff = sg * rng.nextGaussian() * sq;
+        // 3) 直接扩散冲击 + 稀疏跳空（与波段动量共同分担小时方差）
+        double z = rng.nextGaussian();
+        double diffShare = clamp(p.diffusionShare, 0.2D, 1.0D);
+        double rawDiff = diffShare * sg * z * sq;
+        double jump = 0.0D;
         if (rng.nextDouble() < p.jumpProbPerHour * dtH) {
-            diff += p.jumpScale * sg * rng.nextGaussian();
+            jump = p.jumpScale * sg * rng.nextGaussian();
         }
-        diff = clamp(diff, -p.tickMoveCap, p.tickMoveCap);
+        double jumpScaled = jump * Math.min(1.8D, fScale);
+        double fairDiff = clamp(rawDiff * fScale + jumpScaled, -p.tickMoveCap, p.tickMoveCap);
+        double spotDiff = clamp(rawDiff * bScale + jumpScaled, -p.tickMoveCap, p.tickMoveCap);
 
         double lnS = Math.log(s.price);
         double lnF = Math.log(s.fair);
         double lnB = Math.log(Math.max(1.0D, env.basePrice));
 
-        // 4) 公允价：拉向 base + 趋势传导 + 一部分永久创新
-        double lnFNext = lnF + p.kappaFairPerHour * (lnB - lnF) * dtH + mu * p.fairFollow * dtH
-                + p.fairShockShare * diff;
-        double fairNext = clamp(Math.exp(lnFNext), env.lower, env.upper);
+        // 4) 公允价演化：承接主要波段动量，并同步接受日限软着陆与越界回拉，彻底防止公允价跑到涨跌停外把现价吸成水平直线
+        double effKappaFair = p.kappaFairPerHour * Math.pow(fScale, 1.15D);
+        double dayPull = 0.0D;
+        if (env.dayRef > 0.0D && p.dayLimitPct > 0.0D) {
+            double devF = (s.fair - env.dayRef) / env.dayRef;
+            double ratioF = Math.abs(devF) / p.dayLimitPct;
+            if (ratioF > 0.60D) {
+                dayPull = -1.0D * (ratioF - 0.60D) * devF;
+            }
+        }
+        double dlnF = (effKappaFair * (lnB - lnF) + dayPull + mu * p.fairFollow) * dtH
+                + p.fairShockShare * fairDiff;
+        dlnF *= softLandFactor(p, env, s.fair, dlnF);
+        double[] fairBand = band(p, env, s.fair);
+        double fairNext = clamp(s.fair * Math.exp(dlnF), fairBand[0], fairBand[1]);
 
-        // 5) 现价：对数 OU 追公允价 + 趋势余量 + 伊藤修正 + 扩散
+        // 5) 现价演化：与公允价同步承接波段速度 μ（不在趋势期人为滞后），偏离部分按 OU 平滑收敛
+        double prev = s.price;
         double gap = lnF - lnS;
-        double drift = p.meanReversionPerHour * gap + mu * (1.0D - p.fairFollow) + 0.5D * sg * sg;
-        double dlog = clamp(drift * dtH + diff, -p.tickMoveCap, p.tickMoveCap);
-        dlog *= softLandFactor(p, env, s.price, dlog);
+        double ito = 0.5D * (diffShare * sg) * (diffShare * sg);
+        double dlog = clamp((p.meanReversionPerHour * gap + mu + ito) * dtH + spotDiff,
+                -p.tickMoveCap, p.tickMoveCap);
+        dlog *= softLandFactor(p, env, prev, dlog);
 
-        double[] band = band(p, env, s.price);
-        double next = clamp(s.price * Math.exp(dlog), band[0], band[1]);
-        double realized = Math.log(next / s.price);
+        // 波动率反馈看未做低价补偿的经济变动，避免整数补偿把 σ 顶在上限
+        double econDlog = clamp((p.meanReversionPerHour * gap + (mu / fScale) + ito) * dtH
+                + clamp(rawDiff + jump, -p.tickMoveCap, p.tickMoveCap),
+                -p.tickMoveCap, p.tickMoveCap);
+        econDlog *= softLandFactor(p, env, prev, econDlog);
 
-        // 6) 影线与模拟成交量
-        double tickSigma = sg * sq;
-        double wickUp = next * tickSigma * 0.5D * Math.abs(rng.nextGaussian());
-        double wickDn = next * tickSigma * 0.5D * Math.abs(rng.nextGaussian());
-        double volScale = Math.abs(realized) / Math.max(1e-9D, tickSigma);
+        double[] spotBand = band(p, env, prev);
+        double next = clamp(prev * Math.exp(dlog), spotBand[0], spotBand[1]);
+        double econNext = clamp(prev * Math.exp(econDlog), spotBand[0], spotBand[1]);
+        double realized = Math.log(next / prev);
+
+        // 6) 上下影线与模拟成交量（影线同步乘入 bScale，消除低价股 1px 扁平无影线横杠）
+        double wickSigma = diffShare * sg * sq * bScale;
+        double wickUp = next * wickSigma * 0.65D * Math.abs(rng.nextGaussian());
+        double wickDn = next * wickSigma * 0.65D * Math.abs(rng.nextGaussian());
+        double tickSigma = Math.max(1e-9D, sg * sq * bScale);
+        double volScale = Math.abs(realized) / tickSigma;
         double simVol = env.depth * p.depthVolFrac * (0.4D + 0.6D * rng.nextDouble())
                 * (1.0D + p.volMoveGain * volScale) * env.session;
 
-        out.prevPrice = s.price;
+        out.prevPrice = prev;
         out.dlog = realized;
-        out.wickHigh = Math.max(s.price, next) + wickUp;
-        out.wickLow = Math.max(1e-6D, Math.min(s.price, next) - wickDn);
+        out.wickHigh = Math.max(prev, next) + wickUp;
+        out.wickLow = Math.max(1e-6D, Math.min(prev, next) - wickDn);
         out.simVolume = simVol;
 
         s.price = next;
         s.fair = fairNext;
-        s.lastRet = realized;
+        s.lastRet = Math.log(econNext / prev);
         s.newsBoost *= Math.exp(-p.kappaSigmaPerHour * dtH);
         if (s.newsBoost < 0.001D) {
             s.newsBoost = 0.0D;
         }
+    }
+
+    /**
+     * 1 分钟有效扩散的价格标准差不足 {@code barMoveCoins} 星币时，把现价扩散放大到该幅度。
+     * 本身已够大的中高价股返回 1。
+     */
+    static double barScale(PriceParams p, double price, double sigma) {
+        if (!(p.barMoveCoins > 0.0D) || !(sigma > 0.0D) || !(price > 0.0D)) {
+            return 1.0D;
+        }
+        double effSigma = sigma * clamp(p.diffusionShare, 0.2D, 1.0D);
+        double minuteCoins = price * effSigma / Math.sqrt(60.0D);
+        if (minuteCoins >= p.barMoveCoins) {
+            return 1.0D;
+        }
+        return p.barMoveCoins / minuteCoins;
+    }
+
+    /** 低价补偿传导至公允价与波段趋势的协同倍率。 */
+    static double fairScale(PriceParams p, double barScale) {
+        if (barScale <= 1.0D || !(p.barFairShare > 0.0D)) {
+            return 1.0D;
+        }
+        double cap = Math.max(1.0D, p.barFairMaxScale);
+        return Math.min(cap, Math.pow(barScale, clamp(p.barFairShare, 0.0D, 1.0D)));
     }
 
     /**
