@@ -1,0 +1,376 @@
+{
+  "seasonId": "s1_2026",
+  "seasonName": "第 1 赛季",
+  "seasonStartEpochSecond": 0,
+  "durationWeeks": 8,
+  "graceClaimDaysAfterEnd": 7,
+  "rolloverPercent": 30,
+  "rolloverCapPoints": 600,
+  "freeTrackName": "免费奖励",
+  "premiumTrack": {
+    "enabled": true,
+    "trackName": "进阶通行证",
+    "unlockStarCoinCost": 2880,
+    "unlockBonusPoints": 200,
+    "deluxeEnabled": true,
+    "deluxeTrackName": "典藏通行证",
+    "deluxeStarCoinCost": 4880,
+    "deluxeOriginalStarCoinCost": 5880,
+    "deluxeBonusLevels": 10,
+    "deluxeExtraReward": {
+      "money": 680,
+      "points": 0,
+      "items": [
+        {
+          "item": "minecraft:totem_of_undying",
+          "count": 1,
+          "customName": "",
+          "enchantments": {}
+        },
+        {
+          "item": "minecraft:enchanted_golden_apple",
+          "count": 2,
+          "customName": "",
+          "enchantments": {}
+        },
+        {
+          "item": "minecraft:netherite_ingot",
+          "count": 1,
+          "customName": "",
+          "enchantments": {}
+        }
+      ]
+    },
+    "allowPermissionBypass": false,
+    "bypassPermissionNode": "module_shop_quest.pass.vip"
+  },
+  "pointsRule": {
+    "maxLevel": 30,
+    "curveMode": "FORMULA",
+    "basePointsPerLevel": 100,
+    "stepEveryLevels": 10,
+    "stepPointsIncrement": 20,
+    "allowBuyLevels": true,
+    "buyLevelStarCoinCost": 150,
+    "defaultFreeReward": {
+      "money": 40,
+      "points": 0,
+      "items": [
+        {
+          "item": "minecraft:experience_bottle",
+          "count": 4,
+          "customName": "",
+          "enchantments": {}
+        }
+      ]
+    },
+    "defaultPremiumReward": {
+      "money": 90,
+      "points": 0,
+      "items": [
+        {
+          "item": "minecraft:emerald",
+          "count": 2,
+          "customName": "",
+          "enchantments": {}
+        }
+      ]
+    },
+    "milestoneEveryLevels": 5,
+    "defaultMilestoneFreeReward": {
+      "money": 120,
+      "points": 0,
+      "items": [
+        {
+          "item": "minecraft:diamond",
+          "count": 2,
+          "customName": "",
+          "enchantments": {}
+        }
+      ]
+    },
+    "defaultMilestonePremiumReward": {
+      "money": 260,
+      "points": 0,
+      "items": [
+        {
+          "item": "minecraft:diamond",
+          "count": 4,
+          "customName": "",
+          "enchantments": {}
+        },
+        {
+          "item": "minecraft:golden_apple",
+          "count": 2,
+          "customName": "",
+          "enchantments": {}
+        }
+      ]
+    }
+  },
+  "levels": [
+    {
+      "level": 1,
+      "requiredPoints": 0,
+      "highlight": true,
+      "freeReward": {
+        "money": 60,
+        "points": 0,
+        "items": [
+          {
+            "item": "minecraft:bread",
+            "count": 16,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      },
+      "premiumReward": {
+        "money": 150,
+        "points": 0,
+        "items": [
+          {
+            "item": "minecraft:golden_carrot",
+            "count": 12,
+            "customName": "",
+            "enchantments": {}
+          },
+          {
+            "item": "minecraft:emerald",
+            "count": 4,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "level": 5,
+      "requiredPoints": 0,
+      "highlight": true,
+      "freeReward": {
+        "money": 120,
+        "points": 0,
+        "items": [
+          {
+            "item": "minecraft:diamond",
+            "count": 2,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      },
+      "premiumReward": {
+        "money": 280,
+        "points": 0,
+        "items": [
+          {
+            "item": "minecraft:diamond",
+            "count": 5,
+            "customName": "",
+            "enchantments": {}
+          },
+          {
+            "item": "minecraft:golden_apple",
+            "count": 2,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "level": 10,
+      "requiredPoints": 0,
+      "highlight": true,
+      "freeReward": {
+        "money": 200,
+        "points": 0,
+        "items": [
+          {
+            "item": "minecraft:diamond",
+            "count": 4,
+            "customName": "",
+            "enchantments": {}
+          },
+          {
+            "item": "minecraft:experience_bottle",
+            "count": 16,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      },
+      "premiumReward": {
+        "money": 450,
+        "points": 0,
+        "items": [
+          {
+            "item": "minecraft:diamond",
+            "count": 8,
+            "customName": "",
+            "enchantments": {}
+          },
+          {
+            "item": "minecraft:netherite_scrap",
+            "count": 1,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "level": 15,
+      "requiredPoints": 0,
+      "highlight": true,
+      "freeReward": {
+        "money": 260,
+        "points": 0,
+        "items": [
+          {
+            "item": "minecraft:emerald_block",
+            "count": 2,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      },
+      "premiumReward": {
+        "money": 550,
+        "points": 0,
+        "items": [
+          {
+            "item": "minecraft:diamond_block",
+            "count": 1,
+            "customName": "",
+            "enchantments": {}
+          },
+          {
+            "item": "minecraft:golden_apple",
+            "count": 4,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "level": 20,
+      "requiredPoints": 0,
+      "highlight": true,
+      "freeReward": {
+        "money": 350,
+        "points": 0,
+        "items": [
+          {
+            "item": "minecraft:netherite_scrap",
+            "count": 2,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      },
+      "premiumReward": {
+        "money": 750,
+        "points": 0,
+        "items": [
+          {
+            "item": "minecraft:netherite_ingot",
+            "count": 1,
+            "customName": "",
+            "enchantments": {}
+          },
+          {
+            "item": "minecraft:totem_of_undying",
+            "count": 1,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "level": 25,
+      "requiredPoints": 0,
+      "highlight": true,
+      "freeReward": {
+        "money": 420,
+        "points": 0,
+        "items": [
+          {
+            "item": "minecraft:diamond",
+            "count": 8,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      },
+      "premiumReward": {
+        "money": 900,
+        "points": 0,
+        "items": [
+          {
+            "item": "minecraft:netherite_ingot",
+            "count": 1,
+            "customName": "",
+            "enchantments": {}
+          },
+          {
+            "item": "minecraft:enchanted_golden_apple",
+            "count": 1,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "level": 30,
+      "requiredPoints": 0,
+      "highlight": true,
+      "freeReward": {
+        "money": 600,
+        "points": 0,
+        "items": [
+          {
+            "item": "minecraft:netherite_ingot",
+            "count": 1,
+            "customName": "",
+            "enchantments": {}
+          },
+          {
+            "item": "minecraft:diamond_block",
+            "count": 1,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      },
+      "premiumReward": {
+        "money": 1500,
+        "points": 0,
+        "items": [
+          {
+            "item": "minecraft:nether_star",
+            "count": 1,
+            "customName": "",
+            "enchantments": {}
+          },
+          {
+            "item": "minecraft:netherite_ingot",
+            "count": 2,
+            "customName": "",
+            "enchantments": {}
+          },
+          {
+            "item": "minecraft:enchanted_golden_apple",
+            "count": 2,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    }
+  ]
+}

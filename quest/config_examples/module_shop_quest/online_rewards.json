@@ -1,0 +1,108 @@
+{
+  "dailyMilestones": [
+    {
+      "id": "day_15m",
+      "title": "今日在线 15 分钟",
+      "requiredMinutes": 15,
+      "reward": {
+        "money": 25,
+        "points": 25,
+        "items": [
+          {
+            "item": "minecraft:cooked_salmon",
+            "count": 4,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "id": "day_30m",
+      "title": "今日在线 30 分钟",
+      "requiredMinutes": 30,
+      "reward": {
+        "money": 45,
+        "points": 35,
+        "items": [
+          {
+            "item": "minecraft:golden_carrot",
+            "count": 4,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "id": "day_60m",
+      "title": "今日在线 60 分钟",
+      "requiredMinutes": 60,
+      "reward": {
+        "money": 80,
+        "points": 55,
+        "items": [
+          {
+            "item": "minecraft:emerald",
+            "count": 2,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    }
+  ],
+  "weeklyMilestones": [
+    {
+      "id": "week_120m",
+      "title": "本周在线 120 分钟",
+      "requiredMinutes": 120,
+      "reward": {
+        "money": 150,
+        "points": 100,
+        "items": [
+          {
+            "item": "minecraft:diamond",
+            "count": 2,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "id": "week_240m",
+      "title": "本周在线 240 分钟",
+      "requiredMinutes": 240,
+      "reward": {
+        "money": 260,
+        "points": 150,
+        "items": [
+          {
+            "item": "minecraft:golden_apple",
+            "count": 2,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "id": "week_360m",
+      "title": "本周在线 360 分钟",
+      "requiredMinutes": 360,
+      "reward": {
+        "money": 400,
+        "points": 220,
+        "items": [
+          {
+            "item": "minecraft:netherite_scrap",
+            "count": 1,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    }
+  ]
+}

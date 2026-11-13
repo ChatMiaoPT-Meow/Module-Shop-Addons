@@ -1,0 +1,357 @@
+{
+  "dailyPool": [
+    {
+      "id": "d_shop_signin",
+      "title": "商店签到",
+      "description": "完成 1 次每日签到",
+      "categoryTag": "signin",
+      "requiredMod": "module_shop",
+      "type": "SHOP_SIGN_IN",
+      "targetFilter": "",
+      "targetCount": 1,
+      "weight": 25,
+      "reward": {
+        "money": 30,
+        "points": 35,
+        "items": []
+      }
+    },
+    {
+      "id": "d_buy_daily",
+      "title": "商店购买",
+      "description": "在每日商店或购物城购买 1 次商品",
+      "categoryTag": "shop_buy",
+      "requiredMod": "module_shop",
+      "type": "SHOP_BUY_ANY",
+      "targetFilter": "",
+      "targetCount": 1,
+      "weight": 22,
+      "reward": {
+        "money": 40,
+        "points": 40,
+        "items": []
+      }
+    },
+    {
+      "id": "d_sell_buyback",
+      "title": "出售物品",
+      "description": "在每日收购或出货箱出售 1 次物品",
+      "categoryTag": "shop_sell",
+      "requiredMod": "module_shop",
+      "type": "SHOP_SELL_BUYBACK",
+      "targetFilter": "",
+      "targetCount": 1,
+      "weight": 22,
+      "reward": {
+        "money": 45,
+        "points": 40,
+        "items": []
+      }
+    },
+    {
+      "id": "d_stall_or_bid",
+      "title": "摊位与拍卖",
+      "description": "在玩家摊位买东西或参与 1 次拍卖出价",
+      "categoryTag": "market_social",
+      "requiredMod": "module_shop",
+      "type": "STALL_BUY",
+      "targetFilter": "",
+      "targetCount": 1,
+      "weight": 14,
+      "reward": {
+        "money": 50,
+        "points": 45,
+        "items": []
+      }
+    },
+    {
+      "id": "d_stock_spot",
+      "title": "股市交易",
+      "description": "在股市完成 1 笔买入或卖出成交",
+      "categoryTag": "stock",
+      "requiredMod": "module_shop_stock",
+      "type": "STOCK_SPOT_TRADE",
+      "targetFilter": "",
+      "targetCount": 1,
+      "weight": 16,
+      "reward": {
+        "money": 55,
+        "points": 45,
+        "items": []
+      }
+    },
+    {
+      "id": "d_blind_match",
+      "title": "遗迹盲仓",
+      "description": "参与 1 局真人遗迹盲仓",
+      "categoryTag": "blind",
+      "requiredMod": "module_shop_blind",
+      "type": "BLIND_PARTICIPATE",
+      "targetFilter": "",
+      "targetCount": 1,
+      "weight": 14,
+      "reward": {
+        "money": 65,
+        "points": 50,
+        "items": []
+      }
+    },
+    {
+      "id": "d_lottery_pull",
+      "title": "抽卡抽奖",
+      "description": "参与 1 次抽卡或刮刮乐",
+      "categoryTag": "lottery",
+      "requiredMod": "lottery",
+      "type": "LOTTERY_PULL",
+      "targetFilter": "",
+      "targetCount": 1,
+      "weight": 15,
+      "reward": {
+        "money": 45,
+        "points": 40,
+        "items": []
+      }
+    },
+    {
+      "id": "d_mine_ores",
+      "title": "挖掘矿石",
+      "description": "挖掘 8 个任意矿石方块",
+      "categoryTag": "vanilla_mine",
+      "requiredMod": "minecraft",
+      "type": "VANILLA_BREAK_BLOCK",
+      "targetFilter": "_ore",
+      "targetCount": 8,
+      "weight": 12,
+      "reward": {
+        "money": 35,
+        "points": 30,
+        "items": [
+          {
+            "item": "minecraft:torch",
+            "count": 16,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "id": "d_kill_mobs",
+      "title": "击杀怪物",
+      "description": "击杀 10 只敌对生物",
+      "categoryTag": "vanilla_combat",
+      "requiredMod": "minecraft",
+      "type": "VANILLA_KILL_MOB",
+      "targetFilter": "",
+      "targetCount": 10,
+      "weight": 12,
+      "reward": {
+        "money": 40,
+        "points": 35,
+        "items": [
+          {
+            "item": "minecraft:cooked_beef",
+            "count": 4,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "id": "d_fish_catch",
+      "title": "钓鱼",
+      "description": "成功钓起 3 次物品",
+      "categoryTag": "vanilla_fish",
+      "requiredMod": "minecraft",
+      "type": "VANILLA_FISH",
+      "targetFilter": "",
+      "targetCount": 3,
+      "weight": 10,
+      "reward": {
+        "money": 35,
+        "points": 30,
+        "items": []
+      }
+    },
+    {
+      "id": "d_craft_items",
+      "title": "合成物品",
+      "description": "合成 16 件任意物品",
+      "categoryTag": "vanilla_craft",
+      "requiredMod": "minecraft",
+      "type": "VANILLA_CRAFT_ITEM",
+      "targetFilter": "",
+      "targetCount": 16,
+      "weight": 10,
+      "reward": {
+        "money": 30,
+        "points": 30,
+        "items": []
+      }
+    }
+  ],
+  "weeklyPool": [
+    {
+      "id": "w_signin_5",
+      "title": "累计签到",
+      "description": "本周累计签到 5 次",
+      "categoryTag": "w_signin",
+      "requiredMod": "module_shop",
+      "type": "SHOP_SIGN_IN",
+      "targetFilter": "",
+      "targetCount": 5,
+      "weight": 25,
+      "reward": {
+        "money": 180,
+        "points": 180,
+        "items": [
+          {
+            "item": "minecraft:emerald",
+            "count": 4,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "id": "w_shop_buy_6",
+      "title": "商店采购",
+      "description": "本周累计购买 6 次商品",
+      "categoryTag": "w_buy",
+      "requiredMod": "module_shop",
+      "type": "SHOP_BUY_ANY",
+      "targetFilter": "",
+      "targetCount": 6,
+      "weight": 20,
+      "reward": {
+        "money": 200,
+        "points": 200,
+        "items": [
+          {
+            "item": "minecraft:diamond",
+            "count": 2,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "id": "w_buyback_6",
+      "title": "批量出售",
+      "description": "本周累计在收购或出货箱出售 6 次",
+      "categoryTag": "w_sell",
+      "requiredMod": "module_shop",
+      "type": "SHOP_SELL_BUYBACK",
+      "targetFilter": "",
+      "targetCount": 6,
+      "weight": 20,
+      "reward": {
+        "money": 220,
+        "points": 200,
+        "items": [
+          {
+            "item": "minecraft:diamond",
+            "count": 2,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "id": "w_stock_3",
+      "title": "股市交易",
+      "description": "本周完成 3 笔股票买卖",
+      "categoryTag": "w_stock",
+      "requiredMod": "module_shop_stock",
+      "type": "STOCK_SPOT_TRADE",
+      "targetFilter": "",
+      "targetCount": 3,
+      "weight": 15,
+      "reward": {
+        "money": 240,
+        "points": 220,
+        "items": [
+          {
+            "item": "minecraft:golden_apple",
+            "count": 2,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "id": "w_blind_2",
+      "title": "盲仓竞拍",
+      "description": "本周参与 2 局真人遗迹盲仓",
+      "categoryTag": "w_blind",
+      "requiredMod": "module_shop_blind",
+      "type": "BLIND_PARTICIPATE",
+      "targetFilter": "",
+      "targetCount": 2,
+      "weight": 14,
+      "reward": {
+        "money": 260,
+        "points": 240,
+        "items": [
+          {
+            "item": "minecraft:diamond",
+            "count": 3,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "id": "w_kill_45",
+      "title": "清理怪物",
+      "description": "本周累计击杀 45 只敌对生物",
+      "categoryTag": "w_combat",
+      "requiredMod": "minecraft",
+      "type": "VANILLA_KILL_MOB",
+      "targetFilter": "",
+      "targetCount": 45,
+      "weight": 14,
+      "reward": {
+        "money": 180,
+        "points": 160,
+        "items": [
+          {
+            "item": "minecraft:golden_apple",
+            "count": 1,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    },
+    {
+      "id": "w_mine_32",
+      "title": "挖掘矿石",
+      "description": "本周累计挖掘 32 个矿石方块",
+      "categoryTag": "w_mine",
+      "requiredMod": "minecraft",
+      "type": "VANILLA_BREAK_BLOCK",
+      "targetFilter": "_ore",
+      "targetCount": 32,
+      "weight": 14,
+      "reward": {
+        "money": 180,
+        "points": 160,
+        "items": [
+          {
+            "item": "minecraft:iron_ingot",
+            "count": 16,
+            "customName": "",
+            "enchantments": {}
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -5,15 +5,16 @@
 
 | 目录 | 模组 | modid | 版本 | 说明 |
 | --- | --- | --- | --- | --- |
-| [`redpacket/`](redpacket/) | module-shop: Red envelope | `module_shop_redpacket` | 1.0.1 | 拼手气 / 均分红包，聊天栏领取、口令红包 |
-| [`stock/`](stock/) | module-shop: Stock market | `module_shop_stock` | 2.2.0 | 虚拟股市：订单簿、限价 / 市价、做空、K 线与新闻 |
-| [`blind/`](blind/) | Module Shop Blind Vault | `module_shop_blind` | 3.4.0 | 遗迹盲仓暗标竞拍：多房间匹配、鉴定师与道具、AI 补位 |
+| [`redpacket/`](redpacket/) | module-shop: Red envelope | `module_shop_redpacket` | 1.1.0 | 拼手气 / 均分红包，聊天栏领取、口令红包 |
+| [`stock/`](stock/) | module-shop: Stock market | `module_shop_stock` | 2.4.0 | 虚拟股市：订单簿、限价 / 市价、做空、K 线与新闻 |
+| [`blind/`](blind/) | Module Shop Blind Vault | `module_shop_blind` | 3.6.0 | 遗迹盲仓暗标竞拍：多房间匹配、鉴定师与道具、AI 补位 |
+| [`quest/`](quest/) | 星途纪行 / Module Shop: Quest & Pass | `module_shop_quest` | 1.0.0 | 双层赛季通行证、每日/每周任务、防挂机在线奖励与游戏内管理面板 |
 
 ## 前置与兼容
 
 | 前置 | 范围 | 说明 |
 | --- | --- | --- |
-| 模块商店 | `[1.0.3,)`，构建用 1.0.6 | 两端都要装；附属只调用公共 API（同一主版本只增不改） |
+| 模块商店 | `[1.0.3,)`，构建用 1.1.0 | 两端都要装；附属只调用公共 API（同一主版本只增不改） |
 | AtomLib | `[0.1.0-beta,)`，构建用 0.4.0 | 仅客户端；附属不直接调用 AtomLib，统一经过模块商店的 UI 套件 |
 
 **前置库更新的影响**：
@@ -30,10 +31,11 @@
 cd stock    && ./gradlew build -Pmodule_shop_root=../../Module-Shop
 cd ../blind && ./gradlew build -Pmodule_shop_root=../../Module-Shop
 cd ../redpacket && ./gradlew build -Pmodule_shop_root=../../Module-Shop
+cd ../quest && ./gradlew build -Pmodule_shop_root=../../Module-Shop
 # 产物在各自的 build/libs/
 ```
 
-也可以把 `module_shop-1.0.6-api.jar` 放进各项目的 `libs/`，或用 `-Pmodule_shop_api_jar=<文件>` 直接指定。
+也可以把 `module_shop-1.1.0-api.jar` 放进各项目的 `libs/`，或用 `-Pmodule_shop_api_jar=<文件>` 直接指定。
 首次构建会把 AtomLib 发布包下载到各项目的 `.atomlib/` 并做 SHA-256 校验（版本与校验值见各自的 `gradle.properties`）。
 
 ## 许可

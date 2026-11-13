@@ -1,0 +1,41 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+
+[[mods]]
+modId="module_shop_quest"
+version="1.0.0"
+displayName="星途纪行 (Module Shop: Quest & Pass)"
+authors="AutoForged"
+description='''
+Module Shop 附属模组：双层积分赛季通行证（免费基础线 + 星币解锁进阶线）、每日任务、每周任务与防挂机在线时长奖励系统。支持 JSON/TOML 快速配置与游戏内热重载。
+'''
+
+[[dependencies.module_shop_quest]]
+    modId="neoforge"
+    type="required"
+    versionRange="[21.1,21.2)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.module_shop_quest]]
+    modId="minecraft"
+    type="required"
+    versionRange="[1.21.1]"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.module_shop_quest]]
+    modId="module_shop"
+    type="required"
+    versionRange="[1.1.0,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.module_shop_quest]]
+    modId="atomlib"
+    type="required"
+    versionRange="[0.1.0-beta,)"
+    ordering="AFTER"
+    side="CLIENT"
+    reason="侧栏内容页使用与模组商店一致的 AtomLib UI v2 绘制；不可用时自动切换至原版回退界面。"

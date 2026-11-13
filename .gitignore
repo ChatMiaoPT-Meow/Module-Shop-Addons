@@ -7,3 +7,5 @@ runs/
 *.iml
 out/
 libs/*.jar
+**/libs/*.jar
+*.gdoc

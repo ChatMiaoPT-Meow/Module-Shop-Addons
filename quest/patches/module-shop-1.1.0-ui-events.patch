@@ -1,0 +1,28 @@
+# Module-Shop 1.1.0 UI 结算事件下沉参考补丁（对应《每日任务通行证附属方案》§13.2）
+# 说明：
+# 1. 星途纪行 (module_shop_quest) 默认已内置基于公共 HistoryApi 的只读去重流水桥接，
+#    即使不打此补丁，原版 module_shop-1.1.0 中的每日商店购买、购物城购买、每日收购出售、摊位与拍卖出价也能正常推进任务！
+# 2. 若后续升级维护 Module-Shop 主仓，可参考以下位置将 ApiEvents.post 下沉至业务结算层（并移除 ApiImpl 中重复的 post）：
+
+--- a/src/main/java/cn/autoforged/module_shop/shop/ShopManager.java
++++ b/src/main/java/cn/autoforged/module_shop/shop/ShopManager.java
+@@ buyShop 成交记账后（约 L1805） @@
++            cn.autoforged.module_shop.api.event.ApiEvents.post(
++                    new cn.autoforged.module_shop.api.event.PurchaseCompletedEvent(
++                            player.getUUID(), "daily", "daily-" + index, entry.stack, buyCount, total));
+
+@@ buyMall 成交记账后（约 L1870） @@
++            cn.autoforged.module_shop.api.event.ApiEvents.post(
++                    new cn.autoforged.module_shop.api.event.PurchaseCompletedEvent(
++                            player.getUUID(), "mall", "mall-" + index, item.stack, buyCount, total));
+
+@@ sellBuyback 结算处（约 L2740） @@
+-            account.balance = Math.min(max, account.balance + total);
++            long earned = credit(account, total, max);
+             data.setDirty();
+             TransactionLog.record(player.server, player.getUUID(), TransactionLog.SELL, "模块商店",
+-                    total, account.balance, entry.stack.getHoverName().getString() + "×" + taken);
++                    earned, account.balance, entry.stack.getHoverName().getString() + "×" + taken);
++            cn.autoforged.module_shop.api.event.ApiEvents.post(
++                    new cn.autoforged.module_shop.api.event.SellCompletedEvent(
++                            player.getUUID(), "buyback", "buyback-" + index, entry.stack, taken, earned));

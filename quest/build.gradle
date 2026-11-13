@@ -1,0 +1,118 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.144'
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = "${mod_id}"
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+neoForge {
+    version = project.neo_version
+
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+
+    runs {
+        client {
+            client()
+        }
+        server {
+            server()
+            programArgument '--nogui'
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet(sourceSets.main)
+        }
+    }
+}
+
+def shopVersion = project.module_shop_version.toString()
+def pick = { String key, String fallback -> (project.findProperty(key) ?: fallback).toString() }
+def shopRootProp = project.findProperty('module_shop_root')
+def shopLibs = shopRootProp ? new File(file(shopRootProp.toString()), 'build/libs') : file('libs')
+def shopApiJar = pick('module_shop_api_jar', new File(shopLibs, "module_shop-${shopVersion}-api.jar").path)
+def shopJar = pick('module_shop_jar', new File(shopLibs, "module_shop-${shopVersion}.jar").path)
+
+tasks.named('compileJava').configure {
+    def apiJar = shopApiJar
+    doFirst {
+        if (!new File(apiJar).isFile()) {
+            throw new GradleException("找不到模块商店公共 API jar：${apiJar}\n" +
+                    "请放入 libs/，或使用 -Pmodule_shop_root=<主仓库目录>。")
+        }
+    }
+}
+
+configurations {
+    localRuntime
+    runtimeClasspath.extendsFrom localRuntime
+}
+
+apply from: 'gradle/atomlib.gradle'
+
+dependencies {
+    compileOnly files(shopApiJar)
+    if (new File(shopJar).isFile()) {
+        localRuntime files(shopJar)
+    }
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// 兼容 Windows 非 ASCII（中文）工作目录路径运行 JUnit 5 测试
+def nonAsciiPath = !projectDir.path.chars().allMatch { it < 128 }
+if (nonAsciiPath) {
+    def asciiSafeRoot = new File(System.getProperty('java.io.tmpdir'), 'msq-junit-safe')
+    def syncMainForTest = tasks.register('syncMainClassesForTest', Sync) {
+        from sourceSets.main.output.classesDirs
+        into new File(asciiSafeRoot, 'main-classes')
+    }
+    def syncTestClasses = tasks.register('syncTestClassesForTest', Sync) {
+        from sourceSets.test.output.classesDirs
+        into new File(asciiSafeRoot, 'test-classes')
+    }
+    def syncMcJars = tasks.register('syncMcJarsForTest', Sync) {
+        from(layout.buildDirectory.dir('moddev/artifacts')) { include 'neoforge-21.1.248.jar', 'neoforge-21.1.248-client-extra-aka-minecraft-resources.jar' }
+        dependsOn 'createMinecraftArtifacts'
+        into new File(asciiSafeRoot, 'mc-jars')
+    }
+    def mainDirs = sourceSets.main.output.classesDirs.files
+    def testDirs = sourceSets.test.output.classesDirs.files
+    def mainCompileCp = sourceSets.main.compileClasspath
+    def testRuntimeCp = sourceSets.test.runtimeClasspath.filter { f -> !mainDirs.contains(f) && !testDirs.contains(f) }
+    tasks.named('test', Test).configure {
+        dependsOn syncMainForTest, syncTestClasses, syncMcJars
+        testClassesDirs = files(new File(asciiSafeRoot, 'test-classes'))
+        classpath = files(
+                new File(asciiSafeRoot, 'test-classes'),
+                new File(asciiSafeRoot, 'main-classes'),
+                testRuntimeCp,
+                mainCompileCp,
+                fileTree(new File(asciiSafeRoot, 'mc-jars'))
+        )
+    }
+}
+
+tasks.named('test', Test).configure {
+    useJUnitPlatform()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+tasks.withType(ProcessResources).configureEach {
+    filteringCharset = 'UTF-8'
+}
