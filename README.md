@@ -5,10 +5,10 @@
 
 | 目录 | 模组 | modid | 版本 | 说明 |
 | --- | --- | --- | --- | --- |
-| [`redpacket/`](redpacket/) | module-shop: Red envelope | `module_shop_redpacket` | 1.1.0 | 拼手气 / 均分红包，聊天栏领取、口令红包 |
-| [`stock/`](stock/) | module-shop: Stock market | `module_shop_stock` | 2.4.0 | 虚拟股市：订单簿、限价 / 市价、做空、K 线与新闻 |
-| [`blind/`](blind/) | Module Shop Blind Vault | `module_shop_blind` | 3.6.0 | 遗迹盲仓暗标竞拍：多房间匹配、鉴定师与道具、AI 补位 |
-| [`quest/`](quest/) | 星途纪行 / Module Shop: Quest & Pass | `module_shop_quest` | 1.0.0 | 双层赛季通行证、每日/每周任务、防挂机在线奖励与游戏内管理面板 |
+| [`redpacket/`](redpacket/) | Module-Shop Red Packet | `module_shop_redpacket` | 1.1.0 | 拼手气 / 均分红包，聊天栏领取、口令红包 |
+| [`stock/`](stock/) | Module-Shop Stock Market | `module_shop_stock` | 2.4.0 | 虚拟股市：订单簿、限价 / 市价、做空、K 线与新闻 |
+| [`blind/`](blind/) | Module-Shop Blind Vault | `module_shop_blind` | 3.6.0 | 遗迹盲仓暗标竞拍：多房间匹配、鉴定师与道具、AI 补位 |
+| [`quest/`](quest/) | Module-Shop Quest & Pass | `module_shop_quest` | 1.0.0 | 双层赛季通行证、每日/每周任务、防挂机在线奖励与游戏内管理面板 |
 
 ## 前置与兼容
 

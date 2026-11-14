@@ -4,8 +4,8 @@ license="MIT"
 
 [[mods]]
 modId="module_shop_stock"
-version="2.4.0"
-displayName="module-shop: Stock market"
+version="${mod_version}"
+displayName="${mod_name} ${mod_version} for NeoForge ${minecraft_version}"
 authors="ChatMiaoPT-Meow"
 description='''
 模组商店附属：虚拟股市。
