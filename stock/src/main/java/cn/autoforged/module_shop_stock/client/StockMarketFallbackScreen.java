@@ -71,7 +71,7 @@ public final class StockMarketFallbackScreen extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        renderBackground(graphics, mouseX, mouseY, partialTick);
+        renderBackground(graphics);
         super.render(graphics, mouseX, mouseY, partialTick);
         int center = this.width / 2;
         int top = this.height / 2 - 86;

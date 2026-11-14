@@ -1,12 +1,13 @@
 package cn.autoforged.module_shop_stock.client;
 
 import cn.autoforged.module_shop.api.client.ShopModules;
+import cn.autoforged.module_shop_stock.network.StockMarketNetwork;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
-import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
-import net.neoforged.neoforge.common.NeoForge;
+import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 
 /** 客户端入口：注册商店内容页、原版回退界面、网络回包与可选实机自动截屏巡检器。 */
 public final class StockMarketClient {
@@ -21,9 +22,12 @@ public final class StockMarketClient {
                         () -> Component.translatable("tab.module_shop_stock.market"),
                         StockMarketPage::new,
                         StockMarketFallbackScreen::new)));
-        NeoForge.EVENT_BUS.addListener((ClientPlayerNetworkEvent.LoggingOut event) -> StockMarketState.reset());
+        MinecraftForge.EVENT_BUS.addListener((ClientPlayerNetworkEvent.LoggingOut event) -> {
+            StockMarketState.reset();
+            StockMarketNetwork.forgetClient();
+        });
         if (StockRealTour.enabled()) {
-            NeoForge.EVENT_BUS.addListener(StockRealTour::onClientTick);
+            MinecraftForge.EVENT_BUS.addListener(StockRealTour::onClientTick);
         }
     }
 

@@ -5,8 +5,8 @@ import cn.autoforged.module_shop.api.client.ShopTheme;
 import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 
 /** 客户端入口：把「红包」作为内容区页面挂进商店左侧功能区，并处理服务端回包。 */
 public final class RedPacketClient {

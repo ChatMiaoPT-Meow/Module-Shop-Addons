@@ -83,7 +83,7 @@ public final class RedPacketState {
         Component error = null;
         Minecraft mc = Minecraft.getInstance();
         if (mc.level != null && tag.contains("error")) {
-            error = Component.Serializer.fromJson(tag.getString("error"), mc.level.registryAccess());
+            error = Component.Serializer.fromJson(tag.getString("error"));
         }
         showError(error == null ? Component.translatable("gui.module_shop_redpacket.send_failed") : error);
         requestStatus();

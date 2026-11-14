@@ -146,7 +146,7 @@ public final class BlindCatalog {
 
             new Relic("海洋之心", "minecraft:heart_of_the_sea", 5, 1, 1, 12000, 22000, 4),
             new Relic("下界之星", "minecraft:nether_star", 5, 1, 1, 14000, 24000, 1),
-            new Relic("重锤", "minecraft:mace", 5, 1, 2, 18000, 30000, 2),
+            new Relic("下界合金斧", "minecraft:netherite_axe", 5, 1, 2, 18000, 30000, 2),
             new Relic("龙首", "minecraft:dragon_head", 5, 2, 2, 22000, 40000, 4),
             new Relic("龙蛋", "minecraft:dragon_egg", 5, 2, 2, 25000, 45000, 4));
 

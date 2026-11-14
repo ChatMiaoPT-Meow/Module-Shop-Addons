@@ -2,20 +2,31 @@ package com.atoms.Bshop.blind.network;
 
 import com.atoms.Bshop.blind.BlindAuctionMod;
 import com.atoms.Bshop.blind.server.BlindVaultEngine;
+import java.util.Optional;
+import java.util.function.Supplier;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.neoforged.neoforge.network.PacketDistributor;
-import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
-import net.neoforged.neoforge.network.handling.IPayloadContext;
-import net.neoforged.neoforge.network.registration.PayloadRegistrar;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
+import net.minecraftforge.network.NetworkDirection;
+import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.network.NetworkRegistry;
+import net.minecraftforge.network.PacketDistributor;
+import net.minecraftforge.network.simple.SimpleChannel;
 
 /** 附属自有网络协议。客户端只发动作，服务端按玩家下发各自的快照（每人只看到自己的情报）。 */
 public final class BlindAuctionNetwork {
     private static final String PROTOCOL = "8";
+    public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
+            new ResourceLocation(BlindAuctionMod.MODID, "main"),
+            () -> PROTOCOL,
+            PROTOCOL::equals,
+            PROTOCOL::equals
+    );
+
+    private static int packetId = 0;
 
     public static final int SET_ZONE = 0;
     public static final int SET_ROLE = 1;
@@ -28,66 +39,65 @@ public final class BlindAuctionNetwork {
 
     private BlindAuctionNetwork() {}
 
-    private static <T extends CustomPacketPayload> CustomPacketPayload.Type<T> type(String path) {
-        return new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(BlindAuctionMod.MODID, path));
-    }
-
-    public static void register(RegisterPayloadHandlersEvent event) {
-        PayloadRegistrar r = event.registrar(PROTOCOL);
-        r.playToServer(RequestSyncPacket.TYPE, RequestSyncPacket.CODEC, RequestSyncPacket::handle);
-        r.playToServer(ActionPacket.TYPE, ActionPacket.CODEC, ActionPacket::handle);
-        r.playToClient(SnapshotPacket.TYPE, SnapshotPacket.CODEC, SnapshotPacket::handle);
-        r.playToClient(ToastPacket.TYPE, ToastPacket.CODEC, ToastPacket::handle);
+    public static void register() {
+        CHANNEL.registerMessage(packetId++, RequestSyncPacket.class, RequestSyncPacket::encode,
+                RequestSyncPacket::decode, RequestSyncPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(packetId++, ActionPacket.class, ActionPacket::encode,
+                ActionPacket::decode, ActionPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(packetId++, SnapshotPacket.class, SnapshotPacket::encode,
+                SnapshotPacket::decode, SnapshotPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(packetId++, ToastPacket.class, ToastPacket::encode,
+                ToastPacket::decode, ToastPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
 
     public static void requestSync() {
-        PacketDistributor.sendToServer(new RequestSyncPacket());
+        CHANNEL.sendToServer(new RequestSyncPacket());
     }
 
     public static void sendAction(int action, int a, int b, long amount) {
-        PacketDistributor.sendToServer(new ActionPacket(action, a, b, amount));
+        CHANNEL.sendToServer(new ActionPacket(action, a, b, amount));
     }
 
     public static void sendSnapshot(ServerPlayer player, CompoundTag tag) {
-        PacketDistributor.sendToPlayer(player, new SnapshotPacket(tag));
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SnapshotPacket(tag));
     }
 
     public static void sendToast(ServerPlayer player, String message) {
-        PacketDistributor.sendToPlayer(player, new ToastPacket(message));
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new ToastPacket(message));
     }
 
-    public record RequestSyncPacket() implements CustomPacketPayload {
-        public static final Type<RequestSyncPacket> TYPE = BlindAuctionNetwork.type("request_sync");
-        public static final StreamCodec<FriendlyByteBuf, RequestSyncPacket> CODEC =
-                StreamCodec.of((buf, pkt) -> {}, buf -> new RequestSyncPacket());
+    public record RequestSyncPacket() {
+        static void encode(RequestSyncPacket pkt, FriendlyByteBuf buf) {}
 
-        @Override
-        public Type<? extends CustomPacketPayload> type() { return TYPE; }
+        static RequestSyncPacket decode(FriendlyByteBuf buf) {
+            return new RequestSyncPacket();
+        }
 
-        static void handle(RequestSyncPacket pkt, IPayloadContext ctx) {
-            ctx.enqueueWork(() -> {
-                if (ctx.player() instanceof ServerPlayer sp) BlindVaultEngine.syncPlayer(sp);
+        static void handle(RequestSyncPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> {
+                ServerPlayer sp = ctx.get().getSender();
+                if (sp != null) BlindVaultEngine.syncPlayer(sp);
             });
+            ctx.get().setPacketHandled(true);
         }
     }
 
-    public record ActionPacket(int action, int a, int b, long amount) implements CustomPacketPayload {
-        public static final Type<ActionPacket> TYPE = BlindAuctionNetwork.type("action");
-        public static final StreamCodec<FriendlyByteBuf, ActionPacket> CODEC = StreamCodec.of(
-                (buf, pkt) -> {
-                    buf.writeVarInt(pkt.action);
-                    buf.writeVarInt(pkt.a);
-                    buf.writeVarInt(pkt.b);
-                    buf.writeVarLong(pkt.amount);
-                },
-                buf -> new ActionPacket(buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readVarLong()));
+    public record ActionPacket(int action, int a, int b, long amount) {
+        static void encode(ActionPacket pkt, FriendlyByteBuf buf) {
+            buf.writeVarInt(pkt.action);
+            buf.writeVarInt(pkt.a);
+            buf.writeVarInt(pkt.b);
+            buf.writeVarLong(pkt.amount);
+        }
 
-        @Override
-        public Type<? extends CustomPacketPayload> type() { return TYPE; }
+        static ActionPacket decode(FriendlyByteBuf buf) {
+            return new ActionPacket(buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readVarLong());
+        }
 
-        static void handle(ActionPacket pkt, IPayloadContext ctx) {
-            ctx.enqueueWork(() -> {
-                if (!(ctx.player() instanceof ServerPlayer sp)) return;
+        static void handle(ActionPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> {
+                ServerPlayer sp = ctx.get().getSender();
+                if (sp == null) return;
                 switch (pkt.action) {
                     case SET_ZONE -> BlindVaultEngine.setZone(sp, pkt.a);
                     case SET_ROLE -> BlindVaultEngine.setRole(sp, pkt.a);
@@ -100,32 +110,40 @@ public final class BlindAuctionNetwork {
                     default -> { }
                 }
             });
+            ctx.get().setPacketHandled(true);
         }
     }
 
-    public record SnapshotPacket(CompoundTag tag) implements CustomPacketPayload {
-        public static final Type<SnapshotPacket> TYPE = BlindAuctionNetwork.type("snapshot");
-        public static final StreamCodec<FriendlyByteBuf, SnapshotPacket> CODEC = StreamCodec.of(
-                (buf, pkt) -> buf.writeNbt(pkt.tag), buf -> new SnapshotPacket(buf.readNbt()));
+    public record SnapshotPacket(CompoundTag tag) {
+        static void encode(SnapshotPacket pkt, FriendlyByteBuf buf) {
+            buf.writeNbt(pkt.tag);
+        }
 
-        @Override
-        public Type<? extends CustomPacketPayload> type() { return TYPE; }
+        static SnapshotPacket decode(FriendlyByteBuf buf) {
+            CompoundTag tag = buf.readNbt();
+            return new SnapshotPacket(tag == null ? new CompoundTag() : tag);
+        }
 
-        static void handle(SnapshotPacket pkt, IPayloadContext ctx) {
-            ctx.enqueueWork(() -> com.atoms.Bshop.blind.client.BlindAuctionState.apply(pkt.tag));
+        static void handle(SnapshotPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
+                    com.atoms.Bshop.blind.client.BlindAuctionState.apply(pkt.tag)));
+            ctx.get().setPacketHandled(true);
         }
     }
 
-    public record ToastPacket(String message) implements CustomPacketPayload {
-        public static final Type<ToastPacket> TYPE = BlindAuctionNetwork.type("toast");
-        public static final StreamCodec<FriendlyByteBuf, ToastPacket> CODEC = StreamCodec.of(
-                (buf, pkt) -> buf.writeUtf(pkt.message, 200), buf -> new ToastPacket(buf.readUtf(200)));
+    public record ToastPacket(String message) {
+        static void encode(ToastPacket pkt, FriendlyByteBuf buf) {
+            buf.writeUtf(pkt.message, 200);
+        }
 
-        @Override
-        public Type<? extends CustomPacketPayload> type() { return TYPE; }
+        static ToastPacket decode(FriendlyByteBuf buf) {
+            return new ToastPacket(buf.readUtf(200));
+        }
 
-        static void handle(ToastPacket pkt, IPayloadContext ctx) {
-            ctx.enqueueWork(() -> com.atoms.Bshop.blind.client.BlindAuctionState.pushToast(pkt.message));
+        static void handle(ToastPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
+                    com.atoms.Bshop.blind.client.BlindAuctionState.pushToast(pkt.message)));
+            ctx.get().setPacketHandled(true);
         }
     }
 }

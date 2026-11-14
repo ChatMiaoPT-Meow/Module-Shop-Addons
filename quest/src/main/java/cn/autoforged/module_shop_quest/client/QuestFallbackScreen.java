@@ -137,7 +137,7 @@ public final class QuestFallbackScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        renderBackground(g, mouseX, mouseY, partialTick);
+        renderBackground(g);
         int left = (this.width - 420) / 2;
         int top = 26;
 

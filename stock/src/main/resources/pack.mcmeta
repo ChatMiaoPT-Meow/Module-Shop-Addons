@@ -1,0 +1,6 @@
+{
+  "pack": {
+    "description": {"translate": "resourcepack.module_shop_stock", "fallback": "Module-Shop Stock Market resources"},
+    "pack_format": 15
+  }
+}

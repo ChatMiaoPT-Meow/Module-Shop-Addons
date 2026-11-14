@@ -32,7 +32,7 @@ public class BlindAuctionScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        super.render(g, mouseX, mouseY, partialTick);
+        this.renderBackground(g);
         int x = (this.width - W) / 2;
         int y = (this.height - H) / 2;
         if (atom == null) {
@@ -46,6 +46,12 @@ public class BlindAuctionScreen extends Screen {
             gfx.fill(x - 6, y - 6, W + 12, H + 12, 0, ShopTheme.content());
             view.render(gfx, x, y, W, H, mouseX, mouseY);
         }
+        super.render(g, mouseX, mouseY, partialTick);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        return super.mouseScrolled(mouseX, mouseY, delta);
     }
 
     @Override

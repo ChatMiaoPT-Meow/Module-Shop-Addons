@@ -223,7 +223,7 @@ public final class QuestCommands {
         }
         try {
             QuestDataConfig.updatePassLevelRewardAndSave(
-                    level, premium, starcoins, held, source.getServer().registryAccess());
+                    level, premium, starcoins, held);
             QuestManager.reloadAllConfigs(source.getServer(), new ArrayList<>());
             source.sendSuccess(() -> Component.literal(String.format(
                     "[星途纪行] 已写入并热生效通行证 Lv.%d [%s] 奖励：%d 星币%s。",

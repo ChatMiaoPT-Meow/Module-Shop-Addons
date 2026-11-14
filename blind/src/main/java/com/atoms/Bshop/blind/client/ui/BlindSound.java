@@ -52,9 +52,9 @@ public final class BlindSound {
         if (debounce(35L)) play(SoundEvents.BOOK_PAGE_TURN, 1.08F, 0.42F);
     }
 
-    /** 开始匹配 / 开始 AI 演练：1.21 铜灯清脆通电声。 */
+    /** 开始匹配 / 开始 AI 演练：清脆铃声反馈。 */
     public static void startAction() {
-        if (debounce(40L)) play(SoundEvents.COPPER_BULB_TURN_ON, 1.15F, 0.45F);
+        if (debounce(40L)) play(SoundEvents.NOTE_BLOCK_BELL.value(), 1.15F, 0.45F);
     }
 
     /** 数字键输入与快捷加价（+10% / 估值 / 上轮）：极轻短促滴答声，连按不吵。 */
@@ -84,9 +84,9 @@ public final class BlindSound {
         switch (tool) {
             case HAMMER -> play(SoundEvents.STONE_BUTTON_CLICK_ON, 0.92F, 0.45F);
             case LENS -> play(SoundEvents.SPYGLASS_USE, 1.35F, 0.45F);
-            case SCANNER -> play(SoundEvents.COPPER_BULB_TURN_ON, 1.38F, 0.42F);
+            case SCANNER -> play(SoundEvents.LODESTONE_COMPASS_LOCK, 1.38F, 0.42F);
             case GLOWSTICK -> play(SoundEvents.AMETHYST_BLOCK_CHIME, 1.22F, 0.44F);
-            case SONAR -> play(SoundEvents.COPPER_BULB_TURN_ON, 1.52F, 0.42F);
+            case SONAR -> play(SoundEvents.NOTE_BLOCK_PLING.value(), 1.52F, 0.42F);
         }
     }
 
@@ -128,9 +128,9 @@ public final class BlindSound {
             return;
         }
 
-        // 1. 匹配成功 / 进入第 1 轮开局：试炼宝库激活声
+        // 1. 匹配成功 / 进入第 1 轮开局：宝库激活声
         if (lastPhase != Phase.MATCH && curPhase == Phase.MATCH) {
-            play(SoundEvents.VAULT_ACTIVATE, 1.05F, 0.48F);
+            play(SoundEvents.BEACON_ACTIVATE, 1.05F, 0.48F);
             lastSeconds = curSeconds;
         } else if (lastPhase == Phase.MATCH && curPhase == Phase.MATCH) {
             // 2. 推进至新一轮公开揭示（仅界面打开时提示）
@@ -151,7 +151,7 @@ public final class BlindSound {
         if (lastPhase != Phase.RESULT && curPhase == Phase.RESULT && uiVisible) {
             Result res = BlindAuctionState.result();
             if (res == null || res.flop() || res.defaulted()) {
-                play(SoundEvents.VAULT_OPEN_SHUTTER, 0.90F, 0.45F);
+                play(SoundEvents.IRON_DOOR_OPEN, 0.90F, 0.45F);
                 play(SoundEvents.NOTE_BLOCK_BASS.value(), 0.80F, 0.32F);
             } else {
                 String me = null;
@@ -166,13 +166,13 @@ public final class BlindSound {
                 }
                 boolean iWon = me != null && me.equals(res.winner()) && res.human();
                 if ((iWon && res.profit() >= 0L) || (!iWon && myDiv > 0L)) {
-                    play(SoundEvents.VAULT_OPEN_SHUTTER, 1.08F, 0.50F);
+                    play(SoundEvents.IRON_DOOR_OPEN, 1.08F, 0.50F);
                     play(SoundEvents.EXPERIENCE_ORB_PICKUP, 1.18F, 0.38F);
                 } else if (iWon && res.profit() < 0L) {
-                    play(SoundEvents.VAULT_OPEN_SHUTTER, 0.92F, 0.46F);
+                    play(SoundEvents.IRON_DOOR_OPEN, 0.92F, 0.46F);
                     play(SoundEvents.NOTE_BLOCK_BASS.value(), 0.78F, 0.34F);
                 } else {
-                    play(SoundEvents.VAULT_OPEN_SHUTTER, 1.00F, 0.45F);
+                    play(SoundEvents.IRON_DOOR_OPEN, 1.00F, 0.45F);
                 }
             }
         }

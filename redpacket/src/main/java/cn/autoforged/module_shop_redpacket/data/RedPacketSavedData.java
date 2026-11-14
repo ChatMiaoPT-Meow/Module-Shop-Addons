@@ -3,7 +3,6 @@ package cn.autoforged.module_shop_redpacket.data;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -18,10 +17,10 @@ public final class RedPacketSavedData extends SavedData {
 
     public static RedPacketSavedData get(MinecraftServer server) {
         return server.overworld().getDataStorage().computeIfAbsent(
-                new SavedData.Factory<>(RedPacketSavedData::new, RedPacketSavedData::load, null), NAME);
+                RedPacketSavedData::load, RedPacketSavedData::new, NAME);
     }
 
-    private static RedPacketSavedData load(CompoundTag tag, HolderLookup.Provider registries) {
+    private static RedPacketSavedData load(CompoundTag tag) {
         RedPacketSavedData data = new RedPacketSavedData();
         ListTag list = tag.getList("packets", Tag.TAG_COMPOUND);
         for (int i = 0; i < list.size(); i++) {
@@ -32,7 +31,7 @@ public final class RedPacketSavedData extends SavedData {
     }
 
     @Override
-    public CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) {
+    public CompoundTag save(CompoundTag tag) {
         ListTag list = new ListTag();
         for (RedPacket packet : this.packets.values()) {
             list.add(packet.save());

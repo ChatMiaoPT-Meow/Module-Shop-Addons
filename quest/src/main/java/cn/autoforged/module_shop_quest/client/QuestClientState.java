@@ -7,8 +7,6 @@ import cn.autoforged.module_shop_quest.config.QuestDataConfig;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import net.minecraft.client.Minecraft;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -178,9 +176,6 @@ public final class QuestClientState {
         if (root == null || root.isEmpty()) {
             return;
         }
-        HolderLookup.Provider regs = Minecraft.getInstance().level != null
-                ? Minecraft.getInstance().level.registryAccess()
-                : null;
 
         received = true;
         snapshotRevision++;
@@ -215,7 +210,7 @@ public final class QuestClientState {
         deluxeOrigCost = root.contains("deluxeOrigCost") ? root.getLong("deluxeOrigCost") : 5880L;
         deluxeBonusLevels = root.contains("deluxeBonusLevels") ? root.getInt("deluxeBonusLevels") : 10;
         deluxeUnlocked = root.getBoolean("deluxeUnlocked");
-        deluxeReward = decodeReward(root.getCompound("deluxeReward"), regs);
+        deluxeReward = decodeReward(root.getCompound("deluxeReward"));
 
         allowBuyLevels = !root.contains("allowBuyLevels") || root.getBoolean("allowBuyLevels");
         buyLevelCost = root.contains("buyLevelCost") ? Math.max(1L, root.getLong("buyLevelCost")) : 150L;
@@ -241,14 +236,14 @@ public final class QuestClientState {
                     t.getBoolean("highlight"),
                     t.getBoolean("freeClaimed"),
                     t.getBoolean("premClaimed"),
-                    decodeReward(t.getCompound("freeReward"), regs),
-                    decodeReward(t.getCompound("premReward"), regs)
+                    decodeReward(t.getCompound("freeReward")),
+                    decodeReward(t.getCompound("premReward"))
             ));
         }
         passRows = Collections.unmodifiableList(pList);
 
-        dailyRows = decodeQuestList(root.getList("dailyQuests", Tag.TAG_COMPOUND), regs);
-        weeklyRows = decodeQuestList(root.getList("weeklyQuests", Tag.TAG_COMPOUND), regs);
+        dailyRows = decodeQuestList(root.getList("dailyQuests", Tag.TAG_COMPOUND));
+        weeklyRows = decodeQuestList(root.getList("weeklyQuests", Tag.TAG_COMPOUND));
 
         ListTag onlineTag = root.getList("onlineMilestones", Tag.TAG_COMPOUND);
         List<OnlineRow> oList = new ArrayList<>(onlineTag.size());
@@ -261,7 +256,7 @@ public final class QuestClientState {
                     t.getInt("currentMin"),
                     t.getInt("reqMin"),
                     t.getBoolean("claimed"),
-                    decodeReward(t.getCompound("reward"), regs)
+                    decodeReward(t.getCompound("reward"))
             ));
         }
         onlineRows = Collections.unmodifiableList(oList);
@@ -292,7 +287,7 @@ public final class QuestClientState {
         bannerExpireMs = System.currentTimeMillis() + 3600L;
     }
 
-    private static List<QuestRow> decodeQuestList(ListTag tag, HolderLookup.Provider regs) {
+    private static List<QuestRow> decodeQuestList(ListTag tag) {
         List<QuestRow> list = new ArrayList<>(tag.size());
         for (int i = 0; i < tag.size(); i++) {
             CompoundTag t = tag.getCompound(i);
@@ -307,13 +302,13 @@ public final class QuestClientState {
                     t.getInt("target"),
                     t.getBoolean("invalidated"),
                     t.getBoolean("claimed"),
-                    decodeReward(t.getCompound("reward"), regs)
+                    decodeReward(t.getCompound("reward"))
             ));
         }
         return Collections.unmodifiableList(list);
     }
 
-    private static RewardView decodeReward(CompoundTag t, HolderLookup.Provider regs) {
+    private static RewardView decodeReward(CompoundTag t) {
         if (t == null || t.isEmpty()) {
             return RewardView.EMPTY;
         }
@@ -321,12 +316,10 @@ public final class QuestClientState {
         long points = t.getLong("points");
         ListTag itemsTag = t.getList("items", Tag.TAG_COMPOUND);
         List<ItemStack> stacks = new ArrayList<>(itemsTag.size());
-        if (regs != null) {
-            for (int i = 0; i < itemsTag.size(); i++) {
-                ItemStack parsed = ItemStack.parseOptional(regs, itemsTag.getCompound(i));
-                if (!parsed.isEmpty()) {
-                    stacks.add(parsed);
-                }
+        for (int i = 0; i < itemsTag.size(); i++) {
+            ItemStack parsed = ItemStack.of(itemsTag.getCompound(i));
+            if (!parsed.isEmpty()) {
+                stacks.add(parsed);
             }
         }
         return new RewardView(money, points, Collections.unmodifiableList(stacks));

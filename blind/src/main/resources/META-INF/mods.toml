@@ -1,11 +1,11 @@
 modLoader="javafml"
-loaderVersion="[1,)"
+loaderVersion="[47,)"
 license="MIT"
 
 [[mods]]
 modId="module_shop_blind"
-version="3.5.0"
-displayName="Module Shop Blind Vault"
+version="${mod_version}"
+displayName="Module-Shop Blind Vault ${mod_version} for Forge ${minecraft_version}"
 authors="ChatMiaoPT-Meow"
 description='''
 模组商店附属：遗迹盲仓暗标竞拍（星币回收）。
@@ -13,30 +13,29 @@ description='''
 '''
 
 [[dependencies.module_shop_blind]]
-    modId="neoforge"
-    type="required"
-    versionRange="[21.1,21.2)"
+    modId="forge"
+    mandatory=true
+    versionRange="[47,)"
     ordering="NONE"
     side="BOTH"
 
 [[dependencies.module_shop_blind]]
     modId="minecraft"
-    type="required"
-    versionRange="[1.21.1]"
+    mandatory=true
+    versionRange="[1.20.1,1.21)"
     ordering="NONE"
     side="BOTH"
 
 [[dependencies.module_shop_blind]]
     modId="module_shop"
-    type="required"
+    mandatory=true
     versionRange="[1.1.0,)"
     ordering="AFTER"
     side="BOTH"
 
 [[dependencies.module_shop_blind]]
     modId="atomlib"
-    type="required"
+    mandatory=true
     versionRange="[0.1.0-beta,)"
     ordering="AFTER"
     side="CLIENT"
-    reason="盲仓页面使用与模组商店一致的 AtomLib 绘制；不可用时提供原版回退界面。"

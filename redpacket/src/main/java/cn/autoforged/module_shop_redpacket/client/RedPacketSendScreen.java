@@ -85,7 +85,7 @@ public class RedPacketSendScreen extends Screen {
         EditBox box = new EditBox(this.font, x, y, w, 16, Component.empty());
         box.setMaxLength(max);
         box.setValue(value);
-        box.setHint(Component.translatable(hintKey).withColor(0xFF9A9A9A));
+        box.setHint(Component.translatable(hintKey).withStyle(s -> s.withColor(0x9A9A9A)));
         return addRenderableWidget(box);
     }
 
@@ -116,6 +116,7 @@ public class RedPacketSendScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        this.renderBackground(g);
         super.render(g, mouseX, mouseY, partialTick);
         int x = left();
         int y = top();
@@ -142,8 +143,8 @@ public class RedPacketSendScreen extends Screen {
     }
 
     @Override
-    public void renderBackground(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        super.renderBackground(g, mouseX, mouseY, partialTick);
+    public void renderBackground(GuiGraphics g) {
+        super.renderBackground(g);
         int x = left();
         int y = top();
         g.fill(x - 1, y - 1, x + W + 1, y + H + 1, RED_DARK);

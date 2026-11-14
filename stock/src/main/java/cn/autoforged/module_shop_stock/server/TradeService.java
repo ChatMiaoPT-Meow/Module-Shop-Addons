@@ -580,7 +580,7 @@ public final class TradeService {
             return true;
         }
         // 经济与邮件都失败：记入待补发，下个 tick 重试，不让金币凭空消失。
-        MinecraftServer server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
+        MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
         if (server != null) {
             StockMarketSavedData.get(server).addPendingPayout(target, amount);
             return true;

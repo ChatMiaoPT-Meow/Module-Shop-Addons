@@ -8,20 +8,23 @@ import cn.autoforged.module_shop_quest.server.OnlineTimeService;
 import cn.autoforged.module_shop_quest.server.QuestCommands;
 import cn.autoforged.module_shop_quest.server.QuestEventBridge;
 import cn.autoforged.module_shop_quest.server.QuestManager;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.ModContainer;
-import net.neoforged.fml.common.Mod;
-import net.neoforged.fml.config.ModConfig;
-import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
-import net.neoforged.fml.loading.FMLEnvironment;
-import net.neoforged.neoforge.common.NeoForge;
-import net.neoforged.neoforge.event.RegisterCommandsEvent;
-import net.neoforged.neoforge.event.entity.player.PlayerEvent;
-import net.neoforged.neoforge.event.server.ServerStartedEvent;
-import net.neoforged.neoforge.event.server.ServerStoppingEvent;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.server.ServerStartedEvent;
+import net.minecraftforge.event.server.ServerStoppingEvent;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.ModLoadingContext;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.config.ModConfig;
+import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.fml.loading.FMLEnvironment;
+import net.minecraftforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,20 +39,21 @@ public final class QuestMod {
     public static final String MODID = "module_shop_quest";
     public static final Logger LOGGER = LoggerFactory.getLogger(MODID);
 
-    public QuestMod(IEventBus modBus, ModContainer container) {
-        container.registerConfig(ModConfig.Type.COMMON, QuestTomlConfig.SPEC);
+    public QuestMod() {
+        IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
+        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, QuestTomlConfig.SPEC);
 
         modBus.addListener(this::onCommonSetup);
-        modBus.addListener(QuestNetwork::register);
+        QuestNetwork.register();
 
-        IEventBus gameBus = NeoForge.EVENT_BUS;
+        IEventBus gameBus = MinecraftForge.EVENT_BUS;
         gameBus.addListener(this::onServerStarted);
         gameBus.addListener(this::onServerStopping);
         gameBus.addListener(this::onServerTick);
         gameBus.addListener(this::onRegisterCommands);
         gameBus.addListener(this::onPlayerLogin);
         gameBus.addListener(this::onPlayerLogout);
-        QuestEventBridge.registerNeoForgeListeners(gameBus);
+        QuestEventBridge.registerForgeListeners(gameBus);
 
         if (FMLEnvironment.dist == Dist.CLIENT) {
             cn.autoforged.module_shop_quest.client.QuestClient.init(modBus);
@@ -79,12 +83,16 @@ public final class QuestMod {
         QuestEventBridge.resetRuntime();
     }
 
-    private void onServerTick(ServerTickEvent.Post event) {
-        if (!QuestTomlConfig.ENABLED.get()) {
+    private void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END || !QuestTomlConfig.ENABLED.get()) {
             return;
         }
-        OnlineTimeService.onServerTick(event.getServer());
-        QuestEventBridge.onServerTick(event.getServer());
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        if (server == null) {
+            return;
+        }
+        OnlineTimeService.onServerTick(server);
+        QuestEventBridge.onServerTick(server);
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {

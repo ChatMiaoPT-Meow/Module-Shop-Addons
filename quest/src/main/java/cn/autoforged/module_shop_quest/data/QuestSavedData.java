@@ -16,7 +16,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
@@ -48,7 +47,8 @@ public final class QuestSavedData extends SavedData {
 
     public static QuestSavedData get(MinecraftServer server) {
         return server.overworld().getDataStorage().computeIfAbsent(
-                new SavedData.Factory<>(QuestSavedData::new, QuestSavedData::load, null),
+                QuestSavedData::load,
+                QuestSavedData::new,
                 FILE_ID
         );
     }
@@ -132,7 +132,7 @@ public final class QuestSavedData extends SavedData {
 
     // ================================================================ 序列化与反序列化
 
-    public static QuestSavedData load(CompoundTag root, HolderLookup.Provider registries) {
+    public static QuestSavedData load(CompoundTag root) {
         QuestSavedData data = new QuestSavedData();
         data.activeSeasonId = root.getString("activeSeasonId");
         data.seasonStartEpochSec = root.getLong("seasonStartEpochSec");
@@ -155,7 +155,7 @@ public final class QuestSavedData extends SavedData {
     }
 
     @Override
-    public CompoundTag save(CompoundTag root, HolderLookup.Provider registries) {
+    public CompoundTag save(CompoundTag root) {
         root.putInt("schemaVersion", SCHEMA_VERSION);
         root.putString("activeSeasonId", activeSeasonId);
         root.putLong("seasonStartEpochSec", seasonStartEpochSec);

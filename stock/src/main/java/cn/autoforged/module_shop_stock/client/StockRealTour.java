@@ -5,7 +5,7 @@ import java.io.File;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.screens.Screen;
-import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.minecraftforge.event.TickEvent;
 
 /**
  * 实机 OpenGL 帧缓冲自动巡检截屏器（仅在 JVM 参数包含 -Daddons.realshot=stock 时激活，正常游玩零开销）。
@@ -24,8 +24,8 @@ public final class StockRealTour {
         return "stock".equalsIgnoreCase(mode) || "all".equalsIgnoreCase(mode);
     }
 
-    public static void onClientTick(ClientTickEvent.Post event) {
-        if (done) {
+    public static void onClientTick(TickEvent.ClientTickEvent event) {
+        if (event.phase != TickEvent.Phase.END || done) {
             return;
         }
         Minecraft mc = Minecraft.getInstance();

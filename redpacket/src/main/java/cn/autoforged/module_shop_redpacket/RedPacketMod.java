@@ -10,33 +10,36 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.ModContainer;
-import net.neoforged.fml.common.Mod;
-import net.neoforged.fml.config.ModConfig;
-import net.neoforged.fml.loading.FMLEnvironment;
-import net.neoforged.neoforge.common.NeoForge;
-import net.neoforged.neoforge.event.RegisterCommandsEvent;
-import net.neoforged.neoforge.event.ServerChatEvent;
-import net.neoforged.neoforge.event.server.ServerStoppedEvent;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.ServerChatEvent;
+import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.server.ServerStoppedEvent;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.ModLoadingContext;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.config.ModConfig;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.fml.loading.FMLEnvironment;
+import net.minecraftforge.server.ServerLifecycleHooks;
 
-/** 模块商店附属 · 红包。 */
+/** 模块商店附属 · 红包（Forge 1.20.1）。 */
 @Mod(RedPacketMod.MODID)
 public class RedPacketMod {
     public static final String MODID = "module_shop_redpacket";
 
-    public RedPacketMod(IEventBus modBus, ModContainer container) {
+    public RedPacketMod() {
+        IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
         // 只依赖公共 API：主版本 1、次版本 ≥ 1（1.1 起才有侧栏扩展点 ShopModules）。
         // 注意 ApiVersion 的常量会被 javac 内联成「编译时的值」，所以这里读运行时的 describe()。
         checkApiVersion(cn.autoforged.module_shop.api.ApiVersion.describe());
-        container.registerConfig(ModConfig.Type.SERVER, RedPacketConfig.SPEC);
-        modBus.addListener(RedPacketNetwork::register);
-        NeoForge.EVENT_BUS.addListener(RedPacketMod::onCommands);
-        NeoForge.EVENT_BUS.addListener(RedPacketMod::onChat);
-        NeoForge.EVENT_BUS.addListener((ServerTickEvent.Post e) -> RedPacketManager.tick(e.getServer()));
-        NeoForge.EVENT_BUS.addListener((ServerStoppedEvent e) -> RedPacketManager.reset());
+        ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, RedPacketConfig.SPEC);
+        RedPacketNetwork.register();
+        MinecraftForge.EVENT_BUS.addListener(RedPacketMod::onCommands);
+        MinecraftForge.EVENT_BUS.addListener(RedPacketMod::onChat);
+        MinecraftForge.EVENT_BUS.addListener(RedPacketMod::onServerTick);
+        MinecraftForge.EVENT_BUS.addListener((ServerStoppedEvent e) -> RedPacketManager.reset());
         if (FMLEnvironment.dist == Dist.CLIENT) {
             cn.autoforged.module_shop_redpacket.client.RedPacketClient.init(modBus);
         }
@@ -57,6 +60,16 @@ public class RedPacketMod {
             return Integer.parseInt(text.trim());
         } catch (NumberFormatException e) {
             return -1;
+        }
+    }
+
+    private static void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END) {
+            return;
+        }
+        var server = ServerLifecycleHooks.getCurrentServer();
+        if (server != null) {
+            RedPacketManager.tick(server);
         }
     }
 

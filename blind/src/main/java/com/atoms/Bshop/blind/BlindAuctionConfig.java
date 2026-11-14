@@ -1,19 +1,19 @@
 package com.atoms.Bshop.blind;
 
-import net.neoforged.neoforge.common.ModConfigSpec;
+import net.minecraftforge.common.ForgeConfigSpec;
 
 public final class BlindAuctionConfig {
-    public static final ModConfigSpec COMMON_SPEC;
-    public static final ModConfigSpec.IntValue ROUND_DURATION_SECONDS;
-    public static final ModConfigSpec.IntValue MATCHMAKING_WAIT_SECONDS;
-    public static final ModConfigSpec.BooleanValue MULTIPLAYER_AUTO_AI_FILL;
-    public static final ModConfigSpec.IntValue MIN_MULTIPLAYER_PLAYERS;
-    public static final ModConfigSpec.DoubleValue CHAMBER_SINK_TAX_RATE;
-    public static final ModConfigSpec.DoubleValue LOSS_DIVIDEND_RATE;
-    public static final ModConfigSpec.LongValue LOSS_DIVIDEND_CAP;
+    public static final ForgeConfigSpec COMMON_SPEC;
+    public static final ForgeConfigSpec.IntValue ROUND_DURATION_SECONDS;
+    public static final ForgeConfigSpec.IntValue MATCHMAKING_WAIT_SECONDS;
+    public static final ForgeConfigSpec.BooleanValue MULTIPLAYER_AUTO_AI_FILL;
+    public static final ForgeConfigSpec.IntValue MIN_MULTIPLAYER_PLAYERS;
+    public static final ForgeConfigSpec.DoubleValue CHAMBER_SINK_TAX_RATE;
+    public static final ForgeConfigSpec.DoubleValue LOSS_DIVIDEND_RATE;
+    public static final ForgeConfigSpec.LongValue LOSS_DIVIDEND_CAP;
 
     static {
-        ModConfigSpec.Builder b = new ModConfigSpec.Builder();
+        ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
         b.push("blind_vault");
         ROUND_DURATION_SECONDS = b.comment("每轮报价倒计时（秒）")
                 .defineInRange("roundDurationSeconds", 30, 10, 180);

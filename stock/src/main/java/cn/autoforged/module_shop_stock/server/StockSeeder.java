@@ -8,15 +8,17 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import java.io.DataInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.zip.GZIPInputStream;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.server.MinecraftServer;
-import net.neoforged.fml.loading.FMLPaths;
+import net.minecraftforge.fml.loading.FMLPaths;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,7 +38,10 @@ public final class StockSeeder {
             if (!Files.isRegularFile(data)) {
                 return;
             }
-            CompoundTag tag = NbtIo.readCompressed(data, NbtAccounter.unlimitedHeap());
+            CompoundTag tag;
+            try (DataInputStream in = new DataInputStream(new GZIPInputStream(Files.newInputStream(data)))) {
+                tag = NbtIo.read(in, NbtAccounter.UNLIMITED);
+            }
             String format = tag.getString("format");
             if (StockMarketSavedData.FORMAT.equals(format)) {
                 return;

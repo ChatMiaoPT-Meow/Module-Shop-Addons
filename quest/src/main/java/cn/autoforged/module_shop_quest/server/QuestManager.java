@@ -24,14 +24,13 @@ import java.util.List;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.fml.ModList;
+import net.minecraftforge.fml.ModList;
 
 /**
  * 星途纪行服务端总控编排器：
@@ -662,7 +661,6 @@ public final class QuestManager {
         QuestSavedData data = QuestSavedData.get(player.server);
         ensurePlayerUpToDate(player, data);
         PlayerQuestProfile profile = data.profile(player.getUUID());
-        HolderLookup.Provider regs = player.registryAccess();
 
         SeasonPassConfig passCfg = QuestDataConfig.seasonPass();
         List<PassLevelSpec> levels = passCfg.resolvedLevels();
@@ -708,7 +706,7 @@ public final class QuestManager {
         root.putInt("deluxeBonusLevels", deluxeEnabled ? passCfg.premiumTrack.deluxeBonusLevels : 0);
         root.putBoolean("deluxeUnlocked", profile.deluxeUnlocked);
         root.put("deluxeReward", encodeRewardBundle(
-                deluxeEnabled ? passCfg.premiumTrack.deluxeExtraReward : null, regs));
+                deluxeEnabled ? passCfg.premiumTrack.deluxeExtraReward : null));
 
         boolean allowBuyLv = passCfg.pointsRule != null && passCfg.pointsRule.allowBuyLevels;
         root.putBoolean("allowBuyLevels", allowBuyLv);
@@ -751,8 +749,8 @@ public final class QuestManager {
             String pk = PeriodClock.formatRequestId(passCfg.seasonId, player.getUUID(), "pass-extra", "season", String.valueOf(s.level));
             lt.putBoolean("freeClaimed", profile.hasClaimed(fk));
             lt.putBoolean("premClaimed", profile.hasClaimed(pk));
-            lt.put("freeReward", encodeRewardBundle(s.freeReward, regs));
-            lt.put("premReward", encodeRewardBundle(s.premiumReward, regs));
+            lt.put("freeReward", encodeRewardBundle(s.freeReward));
+            lt.put("premReward", encodeRewardBundle(s.premiumReward));
             passTagList.add(lt);
         }
         root.put("passLevels", passTagList);
@@ -761,13 +759,13 @@ public final class QuestManager {
         ListTag dailyTag = new ListTag();
         for (QuestInstance q : profile.dailyQuests) {
             String k = PeriodClock.formatRequestId(passCfg.seasonId, player.getUUID(), "daily", profile.dayKey, q.id);
-            dailyTag.add(encodeQuestInstance(q, "daily", profile.hasClaimed(k), false, regs));
+            dailyTag.add(encodeQuestInstance(q, "daily", profile.hasClaimed(k), false));
         }
         if (QuestTomlConfig.ENABLE_PREV_DAY_GRACE_CLAIM.get() && !profile.prevDayKey.isBlank()) {
             for (QuestInstance q : profile.prevDayQuests) {
                 String k = PeriodClock.formatRequestId(passCfg.seasonId, player.getUUID(), "daily", profile.prevDayKey, q.id);
                 if (q.isCompleted() && !profile.hasClaimed(k)) {
-                    dailyTag.add(encodeQuestInstance(q, "prev_daily", false, false, regs));
+                    dailyTag.add(encodeQuestInstance(q, "prev_daily", false, false));
                 }
             }
         }
@@ -776,7 +774,7 @@ public final class QuestManager {
         ListTag weeklyTag = new ListTag();
         for (QuestInstance q : profile.weeklyQuests) {
             String k = PeriodClock.formatRequestId(passCfg.seasonId, player.getUUID(), "weekly", profile.weekKey, q.id);
-            weeklyTag.add(encodeQuestInstance(q, "weekly", profile.hasClaimed(k), true, regs));
+            weeklyTag.add(encodeQuestInstance(q, "weekly", profile.hasClaimed(k), true));
         }
         root.put("weeklyQuests", weeklyTag);
 
@@ -791,20 +789,20 @@ public final class QuestManager {
         ListTag onlineTag = new ListTag();
         for (OnlineMilestoneSpec m : QuestDataConfig.onlineRewards().dailyMilestones) {
             String k = PeriodClock.formatRequestId(passCfg.seasonId, player.getUUID(), "online-day", profile.dayKey, m.id);
-            onlineTag.add(encodeOnlineMilestone(m, "daily", dayMin, profile.hasClaimed(k), regs));
+            onlineTag.add(encodeOnlineMilestone(m, "daily", dayMin, profile.hasClaimed(k)));
         }
         if (QuestTomlConfig.ENABLE_PREV_DAY_GRACE_CLAIM.get() && !profile.prevDayKey.isBlank()) {
             int prevMin = profile.prevDayOnlineSeconds / 60;
             for (OnlineMilestoneSpec m : QuestDataConfig.onlineRewards().dailyMilestones) {
                 String k = PeriodClock.formatRequestId(passCfg.seasonId, player.getUUID(), "online-day", profile.prevDayKey, m.id);
                 if (prevMin >= m.requiredMinutes && !profile.hasClaimed(k)) {
-                    onlineTag.add(encodeOnlineMilestone(m, "prev_daily", prevMin, false, regs));
+                    onlineTag.add(encodeOnlineMilestone(m, "prev_daily", prevMin, false));
                 }
             }
         }
         for (OnlineMilestoneSpec m : QuestDataConfig.onlineRewards().weeklyMilestones) {
             String k = PeriodClock.formatRequestId(passCfg.seasonId, player.getUUID(), "online-week", profile.weekKey, m.id);
-            onlineTag.add(encodeOnlineMilestone(m, "weekly", weekMin, profile.hasClaimed(k), regs));
+            onlineTag.add(encodeOnlineMilestone(m, "weekly", weekMin, profile.hasClaimed(k)));
         }
         root.put("onlineMilestones", onlineTag);
 
@@ -813,7 +811,7 @@ public final class QuestManager {
     }
 
     private static CompoundTag encodeQuestInstance(QuestInstance q, String period, boolean claimed,
-                                                   boolean weekly, HolderLookup.Provider regs) {
+                                                   boolean weekly) {
         CompoundTag t = new CompoundTag();
         t.putString("id", q.id);
         t.putString("period", period);
@@ -827,12 +825,12 @@ public final class QuestManager {
         t.putInt("target", q.targetCount);
         t.putBoolean("invalidated", q.invalidated);
         t.putBoolean("claimed", claimed);
-        t.put("reward", encodeRewardBundle(resolveLiveQuestReward(q, weekly), regs));
+        t.put("reward", encodeRewardBundle(resolveLiveQuestReward(q, weekly)));
         return t;
     }
 
     private static CompoundTag encodeOnlineMilestone(OnlineMilestoneSpec m, String period, int currentMin,
-                                                     boolean claimed, HolderLookup.Provider regs) {
+                                                     boolean claimed) {
         CompoundTag t = new CompoundTag();
         t.putString("id", m.id);
         t.putString("period", period);
@@ -842,11 +840,11 @@ public final class QuestManager {
         t.putInt("currentMin", Math.min(currentMin, m.requiredMinutes));
         t.putInt("reqMin", m.requiredMinutes);
         t.putBoolean("claimed", claimed);
-        t.put("reward", encodeRewardBundle(m.reward, regs));
+        t.put("reward", encodeRewardBundle(m.reward));
         return t;
     }
 
-    private static CompoundTag encodeRewardBundle(RewardBundleSpec b, HolderLookup.Provider regs) {
+    private static CompoundTag encodeRewardBundle(RewardBundleSpec b) {
         CompoundTag t = new CompoundTag();
         if (b == null) {
             return t;
@@ -854,9 +852,9 @@ public final class QuestManager {
         t.putLong("money", Math.max(0L, b.money));
         t.putLong("points", Math.max(0L, b.points));
         ListTag items = new ListTag();
-        for (ItemStack preview : QuestDataConfig.previewItems(b, regs)) {
+        for (ItemStack preview : QuestDataConfig.previewItems(b)) {
             if (!preview.isEmpty()) {
-                CompoundTag st = (CompoundTag) preview.save(regs, new CompoundTag());
+                CompoundTag st = preview.save(new CompoundTag());
                 items.add(st);
             }
         }

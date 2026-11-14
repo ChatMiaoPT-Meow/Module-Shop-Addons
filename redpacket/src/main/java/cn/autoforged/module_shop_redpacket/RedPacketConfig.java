@@ -1,21 +1,21 @@
 package cn.autoforged.module_shop_redpacket;
 
-import net.neoforged.neoforge.common.ModConfigSpec;
+import net.minecraftforge.common.ForgeConfigSpec;
 
 /** 服务端配置（config/module_shop_redpacket-server.toml）。 */
 public final class RedPacketConfig {
-    public static final ModConfigSpec SPEC;
-    public static final ModConfigSpec.IntValue MAX_COUNT;
-    public static final ModConfigSpec.LongValue MIN_TOTAL;
-    public static final ModConfigSpec.LongValue MAX_TOTAL;
-    public static final ModConfigSpec.IntValue EXPIRE_MINUTES;
-    public static final ModConfigSpec.IntValue SEND_COOLDOWN_SECONDS;
-    public static final ModConfigSpec.BooleanValue ALLOW_SELF_CLAIM;
-    public static final ModConfigSpec.BooleanValue ANNOUNCE_FINISHED;
-    public static final ModConfigSpec.IntValue KEEP_HISTORY_HOURS;
+    public static final ForgeConfigSpec SPEC;
+    public static final ForgeConfigSpec.IntValue MAX_COUNT;
+    public static final ForgeConfigSpec.LongValue MIN_TOTAL;
+    public static final ForgeConfigSpec.LongValue MAX_TOTAL;
+    public static final ForgeConfigSpec.IntValue EXPIRE_MINUTES;
+    public static final ForgeConfigSpec.IntValue SEND_COOLDOWN_SECONDS;
+    public static final ForgeConfigSpec.BooleanValue ALLOW_SELF_CLAIM;
+    public static final ForgeConfigSpec.BooleanValue ANNOUNCE_FINISHED;
+    public static final ForgeConfigSpec.IntValue KEEP_HISTORY_HOURS;
 
     static {
-        ModConfigSpec.Builder b = new ModConfigSpec.Builder();
+        ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
         b.push("red_packet");
         MAX_COUNT = b.comment("单个红包最多拆成几份").defineInRange("maxCount", 100, 1, 1000);
         MIN_TOTAL = b.comment("单个红包最小总额").defineInRange("minTotal", 1L, 1L, Long.MAX_VALUE / 4);

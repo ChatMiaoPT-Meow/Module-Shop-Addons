@@ -26,7 +26,6 @@ import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import javax.annotation.Nullable;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -76,7 +75,7 @@ public final class StockMarketSavedData extends SavedData {
 
     public static StockMarketSavedData get(MinecraftServer server) {
         return server.overworld().getDataStorage().computeIfAbsent(
-                new SavedData.Factory<>(StockMarketSavedData::new, StockMarketSavedData::load, null), NAME);
+                StockMarketSavedData::load, StockMarketSavedData::new, NAME);
     }
 
     public void setLastNews(String symbol, int impact, String text, long timestamp) {
@@ -514,7 +513,7 @@ public final class StockMarketSavedData extends SavedData {
         setDirty();
     }
 
-    private static StockMarketSavedData load(CompoundTag tag, HolderLookup.Provider registries) {
+    private static StockMarketSavedData load(CompoundTag tag) {
         StockMarketSavedData data = new StockMarketSavedData();
         int version = tag.getInt("dataVersion");
         // 非 zip-2.3 的存档：个股 volatility 还是旧口径，读取时迁移一次；保存后 format 变成 zip-2.3，不会再迁。
@@ -831,7 +830,7 @@ public final class StockMarketSavedData extends SavedData {
     }
 
     @Override
-    public CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) {
+    public CompoundTag save(CompoundTag tag) {
         tag.putInt("dataVersion", DATA_VERSION);
         tag.putString("format", FORMAT);
         ListTag payoutList = new ListTag();

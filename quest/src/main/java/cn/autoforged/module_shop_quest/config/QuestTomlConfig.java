@@ -2,7 +2,7 @@ package cn.autoforged.module_shop_quest.config;
 
 import java.time.DateTimeException;
 import java.time.ZoneId;
-import net.neoforged.neoforge.common.ModConfigSpec;
+import net.minecraftforge.common.ForgeConfigSpec;
 
 /**
  * 全局标量运行参数配置（落盘 {@code config/module_shop_quest-common.toml}）。
@@ -11,27 +11,27 @@ import net.neoforged.neoforge.common.ModConfigSpec;
  * {@code config/module_shop_quest/} 目录下的 JSON 文件中，支持 {@code /quest reload} 一键热重载。
  */
 public final class QuestTomlConfig {
-    public static final ModConfigSpec SPEC;
+    public static final ForgeConfigSpec SPEC;
 
-    public static final ModConfigSpec.BooleanValue ENABLED;
-    public static final ModConfigSpec.ConfigValue<String> SIDEBAR_CUSTOM_NAME;
-    public static final ModConfigSpec.ConfigValue<String> ZONE_ID;
-    public static final ModConfigSpec.IntValue DAILY_RESET_HOUR;
-    public static final ModConfigSpec.IntValue WEEKLY_RESET_DAY_OF_WEEK;
+    public static final ForgeConfigSpec.BooleanValue ENABLED;
+    public static final ForgeConfigSpec.ConfigValue<String> SIDEBAR_CUSTOM_NAME;
+    public static final ForgeConfigSpec.ConfigValue<String> ZONE_ID;
+    public static final ForgeConfigSpec.IntValue DAILY_RESET_HOUR;
+    public static final ForgeConfigSpec.IntValue WEEKLY_RESET_DAY_OF_WEEK;
 
-    public static final ModConfigSpec.IntValue AFK_IDLE_SECONDS;
-    public static final ModConfigSpec.DoubleValue AFK_MIN_MOVE_BLOCKS;
-    public static final ModConfigSpec.DoubleValue AFK_MIN_LOOK_DEGREES;
-    public static final ModConfigSpec.BooleanValue SHOW_AFK_PAUSED_HINT;
+    public static final ForgeConfigSpec.IntValue AFK_IDLE_SECONDS;
+    public static final ForgeConfigSpec.DoubleValue AFK_MIN_MOVE_BLOCKS;
+    public static final ForgeConfigSpec.DoubleValue AFK_MIN_LOOK_DEGREES;
+    public static final ForgeConfigSpec.BooleanValue SHOW_AFK_PAUSED_HINT;
 
-    public static final ModConfigSpec.IntValue DAILY_QUEST_COUNT;
-    public static final ModConfigSpec.IntValue WEEKLY_QUEST_COUNT;
-    public static final ModConfigSpec.DoubleValue MIN_MOD_QUEST_RATIO;
-    public static final ModConfigSpec.BooleanValue ENABLE_PREV_DAY_GRACE_CLAIM;
-    public static final ModConfigSpec.BooleanValue ENABLE_SHOP_LEDGER_BRIDGE;
+    public static final ForgeConfigSpec.IntValue DAILY_QUEST_COUNT;
+    public static final ForgeConfigSpec.IntValue WEEKLY_QUEST_COUNT;
+    public static final ForgeConfigSpec.DoubleValue MIN_MOD_QUEST_RATIO;
+    public static final ForgeConfigSpec.BooleanValue ENABLE_PREV_DAY_GRACE_CLAIM;
+    public static final ForgeConfigSpec.BooleanValue ENABLE_SHOP_LEDGER_BRIDGE;
 
     static {
-        ModConfigSpec.Builder b = new ModConfigSpec.Builder();
+        ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
 
         b.comment("星途纪行（每日任务 + 每周任务 + 在线时长奖励 + 双层赛季通行证）核心参数配置").push("general");
         ENABLED = b

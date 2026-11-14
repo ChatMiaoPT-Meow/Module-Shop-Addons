@@ -1,43 +1,42 @@
 modLoader="javafml"
-loaderVersion="[1,)"
+loaderVersion="[47,)"
 license="MIT"
 
 [[mods]]
 modId="module_shop_redpacket"
-version="1.1.0"
-displayName="module-shop: Red envelope"
+version="${mod_version}"
+displayName="Module-Shop Red Packet ${mod_version} for Forge ${minecraft_version}"
 authors="ChatMiaoPT-Meow"
 description='''
-模块商店（Module Shop）附属：红包。
+模块商店（Module Shop）附属：红包（Forge 1.20.1）。
 在商店左侧功能区发红包（拼手气 / 均分，可设口令与祝福语），红包会出现在聊天栏，点击即可领取；
 点「详情」可以查看总额、谁领了、领了多少、手气最佳。过期未领完的部分自动退回。
 '''
 
 [[dependencies.module_shop_redpacket]]
-    modId="neoforge"
-    type="required"
-    versionRange="[21.1,21.2)"
+    modId="forge"
+    mandatory=true
+    versionRange="[47,)"
     ordering="NONE"
     side="BOTH"
 
 [[dependencies.module_shop_redpacket]]
     modId="minecraft"
-    type="required"
-    versionRange="[1.21.1]"
+    mandatory=true
+    versionRange="[1.20.1,1.21)"
     ordering="NONE"
     side="BOTH"
 
 [[dependencies.module_shop_redpacket]]
     modId="module_shop"
-    type="required"
+    mandatory=true
     versionRange="[1.1.0,)"
     ordering="AFTER"
     side="BOTH"
 
 [[dependencies.module_shop_redpacket]]
     modId="atomlib"
-    type="required"
+    mandatory=true
     versionRange="[0.1.0-beta,)"
     ordering="AFTER"
     side="CLIENT"
-    reason="红包页面与详情界面用 AtomLib 绘制（与模块商店相同的前置库）。"

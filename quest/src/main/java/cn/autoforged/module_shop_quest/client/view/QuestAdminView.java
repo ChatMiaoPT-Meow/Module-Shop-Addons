@@ -30,7 +30,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.function.Consumer;
 import net.minecraft.client.Minecraft;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
@@ -1148,7 +1147,6 @@ public final class QuestAdminView {
 
         float gridTop = swY + 19.0F;
         var mc = Minecraft.getInstance();
-        HolderLookup.Provider regs = mc.level != null ? mc.level.registryAccess() : null;
 
         List<ItemStack> displayStacks;
         if (pickerCatalogMode) {
@@ -1248,7 +1246,7 @@ public final class QuestAdminView {
             if (my >= gridTop && my < gridTop + gridH) {
                 final ItemStack picked = st.copy();
                 hit(sx, sy, cellSz, cellSz, () -> {
-                    ItemRewardSpec spec = QuestDataConfig.fromItemStack(picked, regs);
+                    ItemRewardSpec spec = QuestDataConfig.fromItemStack(picked);
                     if (pickerCatalogMode) {
                         int maxStack = Math.max(1, picked.getMaxStackSize());
                         spec.count = Math.min(maxStack, pickerBatchCount);
@@ -1318,8 +1316,6 @@ public final class QuestAdminView {
     private void renderRichItemCardsList(Canvas c, ItemOverlay items, RewardBundleSpec bundle,
                                          BundleMutator mutator,
                                          float x, float y, float w, float h, float mx, float my) {
-        HolderLookup.Provider regs = Minecraft.getInstance().level != null
-                ? Minecraft.getInstance().level.registryAccess() : null;
         if (bundle.items == null || bundle.items.isEmpty()) {
             Draw.fill(c, x, y, w, Math.min(h, 42.0F), 5.0F, Draw.alpha(ShopTheme.text3(), 0.05F));
             Draw.stroke(c, x, y, w, Math.min(h, 42.0F), 5.0F, 0.6F, ShopTheme.borderDim());
@@ -1333,7 +1329,7 @@ public final class QuestAdminView {
             float ry = y + i * (rowH + 3.0F);
             if (ry + rowH > y + h + 2.0F) break;
             ItemRewardSpec spec = bundle.items.get(i);
-            ItemStack st = QuestDataConfig.buildItemStack(spec, regs);
+            ItemStack st = QuestDataConfig.buildItemStack(spec);
 
             Draw.fill(c, x, ry, w, rowH, 4.5F, Draw.alpha(ShopTheme.accent(), ShopTheme.dark() ? 0.12F : 0.06F));
             Draw.stroke(c, x, ry, w, rowH, 4.5F, 0.6F, ShopTheme.borderDim());

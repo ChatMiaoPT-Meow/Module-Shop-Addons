@@ -15,10 +15,10 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
-import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
-import net.neoforged.neoforge.common.NeoForge;
+import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 
 /**
  * 客户端引导、侧栏页面挂载、网络收发与 UI 音效辅助类。
@@ -31,7 +31,7 @@ public final class QuestClient {
 
     public static void init(IEventBus modBus) {
         modBus.addListener(QuestClient::onClientSetup);
-        NeoForge.EVENT_BUS.addListener(QuestClient::onLoggingOut);
+        MinecraftForge.EVENT_BUS.addListener(QuestClient::onLoggingOut);
     }
 
     private static void onClientSetup(FMLClientSetupEvent event) {
@@ -217,10 +217,10 @@ public final class QuestClient {
     }
 
     public static void playClaimSound() {
-        playUiSound(SoundEvents.NOTE_BLOCK_PLING.value(), 1.35F, 0.38F);
+        playUiSound(SoundEvents.NOTE_BLOCK_PLING.get(), 1.35F, 0.38F);
     }
 
     public static void playUnlockSound() {
-        playUiSound(SoundEvents.VAULT_ACTIVATE, 1.08F, 0.46F);
+        playUiSound(SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 1.08F, 0.46F);
     }
 }

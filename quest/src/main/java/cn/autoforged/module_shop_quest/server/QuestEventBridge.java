@@ -20,11 +20,11 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.monster.Enemy;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
-import net.neoforged.neoforge.event.entity.player.ItemFishedEvent;
-import net.neoforged.neoforge.event.entity.player.PlayerEvent;
-import net.neoforged.neoforge.event.level.BlockEvent;
+import net.minecraftforge.event.entity.living.LivingDeathEvent;
+import net.minecraftforge.event.entity.player.ItemFishedEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.level.BlockEvent;
+import net.minecraftforge.eventbus.api.IEventBus;
 
 /**
  * 跨模组与原版事件监听桥接器（已合入盲仓净门票去重、股市限价真实成交防刷过滤、64条批量流水窗口与 1:1 令牌抵消池）。
@@ -152,9 +152,9 @@ public final class QuestEventBridge {
         QuestMod.LOGGER.info("[{}] 已挂载 ModuleShopApi.events() 业务事件监听器", QuestMod.MODID);
     }
 
-    // ================================================================ 2. NeoForge 原版生存任务监听
+    // ================================================================ 2. Forge 原版生存任务监听
 
-    public static void registerNeoForgeListeners(IEventBus gameBus) {
+    public static void registerForgeListeners(IEventBus gameBus) {
         gameBus.addListener((BlockEvent.BreakEvent e) -> {
             if (!(e.getPlayer() instanceof ServerPlayer player) || player.isCreative()) {
                 return;

@@ -20,22 +20,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import net.minecraft.core.Holder;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.Enchantment;
-import net.minecraft.world.item.enchantment.ItemEnchantments;
-import net.neoforged.fml.loading.FMLPaths;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraftforge.fml.loading.FMLPaths;
 
 /**
  * 外部 JSON 数据表配置加载、热保存与可视化配置器双向序列化管理器（目录 {@code config/module_shop_quest/}）。
@@ -208,7 +204,7 @@ public final class QuestDataConfig {
     }
 
     public static synchronized void updatePassLevelRewardAndSave(
-            int level, boolean premium, long money, ItemStack heldTemplate, HolderLookup.Provider registries)
+            int level, boolean premium, long money, ItemStack heldTemplate)
             throws IOException {
         SeasonPassConfig cfg = seasonPass;
         if (cfg.pointsRule != null && level > cfg.pointsRule.maxLevel) {
@@ -238,7 +234,7 @@ public final class QuestDataConfig {
 
         List<ItemRewardSpec> items = new ArrayList<>();
         if (heldTemplate != null && !heldTemplate.isEmpty()) {
-            items.add(fromItemStack(heldTemplate, registries));
+            items.add(fromItemStack(heldTemplate));
         }
         RewardBundleSpec updated = new RewardBundleSpec(Math.max(0L, money), 0L, items);
         if (premium) {
@@ -254,7 +250,7 @@ public final class QuestDataConfig {
         }
     }
 
-    public static ItemStack buildItemStack(ItemRewardSpec spec, HolderLookup.Provider registries) {
+    public static ItemStack buildItemStack(ItemRewardSpec spec) {
         if (spec == null || spec.item == null || spec.item.isBlank() || spec.count <= 0) {
             return ItemStack.EMPTY;
         }
@@ -266,26 +262,24 @@ public final class QuestDataConfig {
         if (item == Items.AIR) {
             return ItemStack.EMPTY;
         }
-        int clampedCount = Math.max(1, Math.min(item.getDefaultMaxStackSize(), spec.count));
-        ItemStack stack = new ItemStack(item, clampedCount);
+        ItemStack stack = new ItemStack(item, 1);
+        int maxStack = Math.max(1, stack.getMaxStackSize());
+        stack.setCount(Math.max(1, Math.min(maxStack, spec.count)));
         if (spec.customName != null && !spec.customName.isBlank()) {
-            stack.set(DataComponents.CUSTOM_NAME, Component.literal(spec.customName));
+            stack.setHoverName(Component.literal(spec.customName));
         }
-        if (registries != null && spec.enchantments != null && !spec.enchantments.isEmpty()) {
+        if (spec.enchantments != null && !spec.enchantments.isEmpty()) {
             try {
-                HolderLookup.RegistryLookup<Enchantment> enchLookup = registries.lookupOrThrow(Registries.ENCHANTMENT);
-                ItemEnchantments.Mutable mutable = new ItemEnchantments.Mutable(ItemEnchantments.EMPTY);
+                Map<Enchantment, Integer> enchMap = new LinkedHashMap<>();
                 for (Map.Entry<String, Integer> entry : spec.enchantments.entrySet()) {
                     ResourceLocation enchId = ResourceLocation.tryParse(entry.getKey());
                     int lvl = entry.getValue() == null ? 0 : entry.getValue();
                     if (enchId != null && lvl > 0) {
-                        ResourceKey<Enchantment> key = ResourceKey.create(Registries.ENCHANTMENT, enchId);
-                        enchLookup.get(key).ifPresent((Holder.Reference<Enchantment> h) -> mutable.set(h, lvl));
+                        BuiltInRegistries.ENCHANTMENT.getOptional(enchId).ifPresent(e -> enchMap.put(e, lvl));
                     }
                 }
-                ItemEnchantments built = mutable.toImmutable();
-                if (!built.isEmpty()) {
-                    stack.set(DataComponents.ENCHANTMENTS, built);
+                if (!enchMap.isEmpty()) {
+                    EnchantmentHelper.setEnchantments(enchMap, stack);
                 }
             } catch (Exception e) {
                 QuestMod.LOGGER.debug("[{}] 解析附魔组件跳过：{}", QuestMod.MODID, e.getMessage());
@@ -294,17 +288,17 @@ public final class QuestDataConfig {
         return stack;
     }
 
-    public static List<ItemStack> materializeItems(RewardBundleSpec bundle, HolderLookup.Provider registries) {
-        return buildItemStacks(bundle, registries);
+    public static List<ItemStack> materializeItems(RewardBundleSpec bundle) {
+        return buildItemStacks(bundle);
     }
 
-    public static List<ItemStack> previewItems(RewardBundleSpec bundle, HolderLookup.Provider registries) {
+    public static List<ItemStack> previewItems(RewardBundleSpec bundle) {
         if (bundle == null || bundle.items == null || bundle.items.isEmpty()) {
             return List.of();
         }
         List<ItemStack> out = new ArrayList<>();
         for (ItemRewardSpec spec : bundle.items) {
-            ItemStack st = buildItemStack(spec, registries);
+            ItemStack st = buildItemStack(spec);
             if (!st.isEmpty()) {
                 out.add(st);
             }
@@ -312,7 +306,7 @@ public final class QuestDataConfig {
         return out;
     }
 
-    public static List<ItemStack> buildItemStacks(RewardBundleSpec bundle, HolderLookup.Provider registries) {
+    public static List<ItemStack> buildItemStacks(RewardBundleSpec bundle) {
         if (bundle == null || bundle.items == null || bundle.items.isEmpty()) {
             return List.of();
         }
@@ -328,14 +322,14 @@ public final class QuestDataConfig {
                 continue;
             }
             int remaining = spec.count;
-            int maxStack = Math.max(1, item.getDefaultMaxStackSize());
+            int maxStack = Math.max(1, new ItemStack(item).getMaxStackSize());
             while (remaining > 0) {
                 int batch = Math.min(maxStack, remaining);
                 ItemRewardSpec slice = new ItemRewardSpec(spec.item, batch, spec.customName);
                 if (spec.enchantments != null) {
                     slice.enchantments.putAll(spec.enchantments);
                 }
-                ItemStack stack = buildItemStack(slice, registries);
+                ItemStack stack = buildItemStack(slice);
                 if (!stack.isEmpty()) {
                     result.add(stack);
                 }
@@ -345,14 +339,16 @@ public final class QuestDataConfig {
         return result;
     }
 
-    public static ItemRewardSpec fromItemStack(ItemStack stack, HolderLookup.Provider registries) {
+    public static ItemRewardSpec fromItemStack(ItemStack stack) {
         String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-        Component custom = stack.get(DataComponents.CUSTOM_NAME);
-        String name = custom != null ? custom.getString() : "";
+        String name = stack.hasCustomHoverName() ? stack.getHoverName().getString() : "";
         ItemRewardSpec spec = new ItemRewardSpec(itemId, stack.getCount(), name);
-        ItemEnchantments enchs = stack.getOrDefault(DataComponents.ENCHANTMENTS, ItemEnchantments.EMPTY);
-        for (var entry : enchs.entrySet()) {
-            entry.getKey().unwrapKey().ifPresent(k -> spec.enchantments.put(k.location().toString(), entry.getIntValue()));
+        Map<Enchantment, Integer> enchs = EnchantmentHelper.getEnchantments(stack);
+        for (Map.Entry<Enchantment, Integer> entry : enchs.entrySet()) {
+            ResourceLocation key = BuiltInRegistries.ENCHANTMENT.getKey(entry.getKey());
+            if (key != null && entry.getValue() != null && entry.getValue() > 0) {
+                spec.enchantments.put(key.toString(), entry.getValue());
+            }
         }
         return spec;
     }

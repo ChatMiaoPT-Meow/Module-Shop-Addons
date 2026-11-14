@@ -1,0 +1,40 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
+
+[[mods]]
+modId="module_shop_quest"
+version="${mod_version}"
+displayName="Module-Shop Quest & Pass ${mod_version} for Forge ${minecraft_version}"
+authors="${mod_authors}"
+description='''
+Module Shop 附属模组（Forge 1.20.1）：双层积分赛季通行证（免费基础线 + 星币解锁进阶线 / 典藏线）、每日任务、每周任务与防挂机在线时长奖励系统。支持 JSON/TOML 快速配置与游戏内热重载。
+'''
+
+[[dependencies.module_shop_quest]]
+    modId="forge"
+    mandatory=true
+    versionRange="${forge_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.module_shop_quest]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.module_shop_quest]]
+    modId="module_shop"
+    mandatory=true
+    versionRange="${module_shop_version_range}"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.module_shop_quest]]
+    modId="atomlib"
+    mandatory=true
+    versionRange="${atomlib_version_range}"
+    ordering="AFTER"
+    side="CLIENT"

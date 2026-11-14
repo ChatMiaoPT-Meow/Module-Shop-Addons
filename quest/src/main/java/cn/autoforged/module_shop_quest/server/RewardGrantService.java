@@ -67,7 +67,7 @@ public final class RewardGrantService {
         try {
             long money = Math.max(0L, reward.money);
             long points = applySeasonPoints ? Math.max(0L, reward.points) : 0L;
-            List<ItemStack> stacks = QuestDataConfig.materializeItems(reward, player.registryAccess());
+            List<ItemStack> stacks = QuestDataConfig.materializeItems(reward);
 
             if (money > 0L || !stacks.isEmpty()) {
                 ApiResult<Void> apiRes = ModuleShopApi.reward().grantOnce(

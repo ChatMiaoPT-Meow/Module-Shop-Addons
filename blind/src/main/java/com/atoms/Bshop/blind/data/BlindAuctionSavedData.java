@@ -5,7 +5,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -32,7 +31,7 @@ public class BlindAuctionSavedData extends SavedData {
 
     public static BlindAuctionSavedData get(MinecraftServer server) {
         return server.overworld().getDataStorage().computeIfAbsent(
-                new SavedData.Factory<>(BlindAuctionSavedData::new, BlindAuctionSavedData::load, null), DATA_NAME);
+                BlindAuctionSavedData::load, BlindAuctionSavedData::new, DATA_NAME);
     }
 
     public Loadout loadout(UUID player) {
@@ -62,7 +61,7 @@ public class BlindAuctionSavedData extends SavedData {
         setDirty();
     }
 
-    public static BlindAuctionSavedData load(CompoundTag tag, HolderLookup.Provider registries) {
+    public static BlindAuctionSavedData load(CompoundTag tag) {
         BlindAuctionSavedData data = new BlindAuctionSavedData();
         ListTag ls = tag.getList("loadouts", Tag.TAG_COMPOUND);
         for (int i = 0; i < ls.size(); i++) {
@@ -85,7 +84,7 @@ public class BlindAuctionSavedData extends SavedData {
     }
 
     @Override
-    public CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) {
+    public CompoundTag save(CompoundTag tag) {
         ListTag ls = new ListTag();
         for (Map.Entry<UUID, Loadout> en : loadouts.entrySet()) {
             CompoundTag e = new CompoundTag();

@@ -83,14 +83,14 @@ public class RedPacketDetailScreen extends Screen {
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollY) {
         this.scroll = Mth.clamp(this.scroll - scrollY * ROW_H, 0, maxScroll());
         return true;
     }
 
     @Override
-    public void renderBackground(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        super.renderBackground(g, mouseX, mouseY, partialTick);
+    public void renderBackground(GuiGraphics g) {
+        super.renderBackground(g);
         int x = left();
         int y = top();
         g.fill(x - 1, y - 1, x + W + 1, y + H + 1, RED_DARK);
@@ -101,6 +101,7 @@ public class RedPacketDetailScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        this.renderBackground(g);
         super.render(g, mouseX, mouseY, partialTick);
         int x = left();
         int y = top();

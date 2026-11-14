@@ -120,7 +120,7 @@ public class RedPacketDetailAtomScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        renderBackground(g, mouseX, mouseY, partialTick);
+        renderBackground(g);
         float dt = this.clock.tick();
         this.openT = Motion.approach(this.openT, 1.0F, dt, 90.0F);
         metrics();
@@ -431,7 +431,7 @@ public class RedPacketDetailAtomScreen extends Screen {
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollY) {
         TABLE.wheel(toUnits(mouseX), toUnits(mouseY), scrollY, hasShiftDown());
         return true;
     }
