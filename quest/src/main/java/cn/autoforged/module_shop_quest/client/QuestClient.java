@@ -68,11 +68,8 @@ public final class QuestClient {
         switch (type) {
             case "snapshot" -> QuestClientState.applySnapshot(tag.getCompound("snapshot"));
             case "online_delta" -> QuestClientState.applyOnlineDelta(tag);
-            case "admin_config" -> QuestClientState.applyAdminConfig(
-                    tag.getString("passJson"),
-                    tag.getString("poolsJson"),
-                    tag.getString("onlineJson")
-            );
+            case "admin_config" -> QuestClientState.applyAdminConfig(tag);
+            case "admin_registries" -> QuestClientState.applyAdminRegistries(tag);
             case "action_result" -> {
                 boolean ok = tag.getBoolean("ok");
                 String msgKey = tag.getString("message");
@@ -131,6 +128,18 @@ public final class QuestClient {
         t.putString("action", "claim_quest");
         t.putString("period", period);
         t.putString("questId", questId);
+        QuestNetwork.sendToServer(t);
+    }
+
+    public static void sendSubmitQuestItem(String period, String questId, int targetIndex) {
+        playClickSound(1.22F);
+        CompoundTag t = new CompoundTag();
+        t.putString("action", "submit_quest_item");
+        t.putString("period", period);
+        t.putString("questId", questId);
+        if (targetIndex >= 0) {
+            t.putInt("targetIndex", targetIndex);
+        }
         QuestNetwork.sendToServer(t);
     }
 

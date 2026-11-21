@@ -11,15 +11,28 @@ import cn.autoforged.module_shop.api.view.TransactionInfo;
 import cn.autoforged.module_shop_quest.QuestMod;
 import cn.autoforged.module_shop_quest.config.ConfigModels.QuestTaskType;
 import cn.autoforged.module_shop_quest.config.QuestTomlConfig;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.StructureManager;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.levelgen.structure.Structure;
+import net.minecraft.world.level.levelgen.structure.StructureStart;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.player.ItemFishedEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
@@ -27,15 +40,18 @@ import net.minecraftforge.event.level.BlockEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 
 /**
- * 跨模组与原版事件监听桥接器（已合入盲仓净门票去重、股市限价真实成交防刷过滤、64条批量流水窗口与 1:1 令牌抵消池）。
+ * 跨模组与原版事件监听桥接器（已合入盲仓净门票去重、股市限价真实成交防刷过滤、64条批量流水窗口、
+ * 1:1 令牌抵消池、Tag 匹配及低频群系/结构探索检测）。
  */
 public final class QuestEventBridge {
     private static final int LEDGER_POLL_LIMIT = 64;
     private static final long API_CREDIT_TTL_MS = 3500L;
+    private static final int LOCATION_CHECK_INTERVAL_TICKS = 30;
 
     private static final Map<UUID, LedgerCursor> LEDGER_CURSORS = new ConcurrentHashMap<>();
     private static final Map<String, ConcurrentLinkedDeque<Long>> PENDING_API_CREDITS = new ConcurrentHashMap<>();
     private static int ledgerTickCounter = 0;
+    private static int locationTickCounter = 0;
 
     private static final class LedgerCursor {
         long lastTxTimeMs;
@@ -54,6 +70,25 @@ public final class QuestEventBridge {
         LEDGER_CURSORS.clear();
         PENDING_API_CREDITS.clear();
         ledgerTickCounter = 0;
+        locationTickCounter = 0;
+    }
+
+    public static Set<String> extractItemTags(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> tags = new HashSet<>();
+        stack.getTags().forEach(tk -> tags.add(tk.location().toString()));
+        return tags;
+    }
+
+    private static <T> Set<String> extractHolderTags(Holder<T> holder) {
+        if (holder == null) {
+            return Set.of();
+        }
+        Set<String> tags = new HashSet<>();
+        holder.tags().forEach(tk -> tags.add(tk.location().toString()));
+        return tags;
     }
 
     public static void onPlayerLogin(ServerPlayer player) {
@@ -97,12 +132,13 @@ public final class QuestEventBridge {
                 String itemId = e.item() != null && !e.item().isEmpty()
                         ? BuiltInRegistries.ITEM.getKey(e.item().getItem()).toString()
                         : e.itemId();
+                Set<String> itemTags = extractItemTags(e.item());
                 if ("mall".equalsIgnoreCase(src)) {
-                    QuestManager.recordProgress(server, e.playerId(), QuestTaskType.SHOP_BUY_MALL, itemId, 1);
+                    QuestManager.recordProgress(server, e.playerId(), QuestTaskType.SHOP_BUY_MALL, itemId, itemTags, 1, true);
                 } else if ("stall".equalsIgnoreCase(src)) {
-                    QuestManager.recordProgress(server, e.playerId(), QuestTaskType.STALL_BUY, itemId, 1);
+                    QuestManager.recordProgress(server, e.playerId(), QuestTaskType.STALL_BUY, itemId, itemTags, 1, true);
                 } else {
-                    QuestManager.recordProgress(server, e.playerId(), QuestTaskType.SHOP_BUY_DAILY, itemId, 1);
+                    QuestManager.recordProgress(server, e.playerId(), QuestTaskType.SHOP_BUY_DAILY, itemId, itemTags, 1, true);
                 }
             }
         });
@@ -115,7 +151,8 @@ public final class QuestEventBridge {
                 String itemId = e.item() != null && !e.item().isEmpty()
                         ? BuiltInRegistries.ITEM.getKey(e.item().getItem()).toString()
                         : e.itemId();
-                QuestManager.recordProgress(server, e.playerId(), QuestTaskType.SHOP_SELL_BUYBACK, itemId, 1);
+                QuestManager.recordProgress(server, e.playerId(), QuestTaskType.SHOP_SELL_BUYBACK,
+                        itemId, extractItemTags(e.item()), 1, true);
             }
         });
 
@@ -145,7 +182,8 @@ public final class QuestEventBridge {
                 String itemId = e.stack() != null && !e.stack().isEmpty()
                         ? BuiltInRegistries.ITEM.getKey(e.stack().getItem()).toString()
                         : "";
-                QuestManager.recordProgress(server, e.playerId(), QuestTaskType.STALL_LIST, itemId, 1);
+                QuestManager.recordProgress(server, e.playerId(), QuestTaskType.STALL_LIST,
+                        itemId, extractItemTags(e.stack()), 1, true);
             }
         });
 
@@ -164,7 +202,10 @@ public final class QuestEventBridge {
                 return;
             }
             String blockKey = BuiltInRegistries.BLOCK.getKey(e.getState().getBlock()).toString();
-            QuestManager.recordProgress(player.server, player.getUUID(), QuestTaskType.VANILLA_BREAK_BLOCK, blockKey, 1);
+            Set<String> blockTags = new HashSet<>();
+            e.getState().getTags().forEach(tk -> blockTags.add(tk.location().toString()));
+            QuestManager.recordProgress(player.server, player.getUUID(), QuestTaskType.VANILLA_BREAK_BLOCK,
+                    blockKey, blockTags, 1, true);
         });
 
         gameBus.addListener((LivingDeathEvent e) -> {
@@ -175,14 +216,14 @@ public final class QuestEventBridge {
                 return;
             }
             OnlineTimeService.recordRealAction(player.getUUID());
-            if (!(e.getEntity() instanceof Enemy)) {
-                return;
-            }
             if (!QuestManager.hasActiveUnfinishedType(player.server, player.getUUID(), QuestTaskType.VANILLA_KILL_MOB)) {
                 return;
             }
+            boolean isEnemy = e.getEntity() instanceof Enemy;
             String entityKey = BuiltInRegistries.ENTITY_TYPE.getKey(e.getEntity().getType()).toString();
-            QuestManager.recordProgress(player.server, player.getUUID(), QuestTaskType.VANILLA_KILL_MOB, entityKey, 1);
+            Set<String> entityTags = extractHolderTags(e.getEntity().getType().builtInRegistryHolder());
+            QuestManager.recordProgress(player.server, player.getUUID(), QuestTaskType.VANILLA_KILL_MOB,
+                    entityKey, entityTags, 1, isEnemy);
         });
 
         gameBus.addListener((PlayerEvent.ItemCraftedEvent e) -> {
@@ -196,7 +237,8 @@ public final class QuestEventBridge {
             }
             String itemKey = BuiltInRegistries.ITEM.getKey(e.getCrafting().getItem()).toString();
             int craftedCount = Math.max(1, e.getCrafting().getCount());
-            QuestManager.recordProgress(player.server, player.getUUID(), QuestTaskType.VANILLA_CRAFT_ITEM, itemKey, craftedCount);
+            QuestManager.recordProgress(player.server, player.getUUID(), QuestTaskType.VANILLA_CRAFT_ITEM,
+                    itemKey, extractItemTags(e.getCrafting()), craftedCount, true);
         });
 
         gameBus.addListener((ItemFishedEvent e) -> {
@@ -207,14 +249,22 @@ public final class QuestEventBridge {
             if (!QuestManager.hasActiveUnfinishedType(player.server, player.getUUID(), QuestTaskType.VANILLA_FISH)) {
                 return;
             }
-            String fishKey = BuiltInRegistries.ITEM.getKey(e.getDrops().get(0).getItem()).toString();
-            QuestManager.recordProgress(player.server, player.getUUID(), QuestTaskType.VANILLA_FISH, fishKey, 1);
+            ItemStack primary = e.getDrops().get(0);
+            String fishKey = BuiltInRegistries.ITEM.getKey(primary.getItem()).toString();
+            QuestManager.recordProgress(player.server, player.getUUID(), QuestTaskType.VANILLA_FISH,
+                    fishKey, extractItemTags(primary), 1, true);
         });
     }
 
-    // ================================================================ 3. 公共 HistoryApi 只读流水去重桥接
+    // ================================================================ 3. 公共 HistoryApi 流水桥接 + 低频群系/结构探索检查
 
     public static void onServerTick(MinecraftServer server) {
+        locationTickCounter++;
+        if (locationTickCounter >= LOCATION_CHECK_INTERVAL_TICKS) {
+            locationTickCounter = 0;
+            tickLocationQuests(server);
+        }
+
         if (!QuestTomlConfig.ENABLE_SHOP_LEDGER_BRIDGE.get()) {
             return;
         }
@@ -380,6 +430,62 @@ public final class QuestEventBridge {
             }
             if ((now - head) <= API_CREDIT_TTL_MS) {
                 return true;
+            }
+        }
+    }
+
+    private static void tickLocationQuests(MinecraftServer server) {
+        List<ServerPlayer> players = server.getPlayerList().getPlayers();
+        if (players.isEmpty()) {
+            return;
+        }
+        for (ServerPlayer player : players) {
+            if (player.isSpectator() && !player.hasPermissions(2)) {
+                continue;
+            }
+            UUID uuid = player.getUUID();
+            boolean needBiome = QuestManager.hasActiveUnfinishedType(server, uuid, QuestTaskType.VISIT_BIOME);
+            boolean needStructure = QuestManager.hasActiveUnfinishedType(server, uuid, QuestTaskType.VISIT_STRUCTURE);
+            if (!needBiome && !needStructure) {
+                continue;
+            }
+            ServerLevel level = player.serverLevel();
+            BlockPos pos = player.blockPosition();
+            if (needBiome) {
+                try {
+                    Holder<Biome> biomeHolder = level.getBiome(pos);
+                    String biomeId = biomeHolder.unwrapKey().map(k -> k.location().toString()).orElse("");
+                    if (!biomeId.isEmpty()) {
+                        Set<String> biomeTags = extractHolderTags(biomeHolder);
+                        QuestManager.recordProgress(server, uuid, QuestTaskType.VISIT_BIOME, biomeId, biomeTags, 1, true);
+                    }
+                } catch (Exception e) {
+                    QuestMod.LOGGER.debug("[{}] 检测玩家群系异常：{}", QuestMod.MODID, e.getMessage());
+                }
+            }
+            if (needStructure) {
+                try {
+                    StructureManager sm = level.structureManager();
+                    var allAtPos = sm.getAllStructuresAt(pos);
+                    if (allAtPos != null && !allAtPos.isEmpty()) {
+                        Registry<Structure> structReg = level.registryAccess().registryOrThrow(Registries.STRUCTURE);
+                        for (Structure structure : allAtPos.keySet()) {
+                            StructureStart start = sm.getStructureWithPieceAt(pos, structure);
+                            if (start != null && start.isValid()) {
+                                ResourceLocation rl = structReg.getKey(structure);
+                                if (rl != null) {
+                                    Set<String> structTags = structReg.getHolder(structReg.getId(structure))
+                                            .map(QuestEventBridge::extractHolderTags)
+                                            .orElse(Set.of());
+                                    QuestManager.recordProgress(server, uuid, QuestTaskType.VISIT_STRUCTURE,
+                                            rl.toString(), structTags, 1, true);
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    QuestMod.LOGGER.debug("[{}] 检测玩家结构异常：{}", QuestMod.MODID, e.getMessage());
+                }
             }
         }
     }

@@ -16,8 +16,11 @@ import cn.autoforged.module_shop_quest.client.QuestClientState.OnlineRow;
 import cn.autoforged.module_shop_quest.client.QuestClientState.PassRow;
 import cn.autoforged.module_shop_quest.client.QuestClientState.QuestRow;
 import cn.autoforged.module_shop_quest.client.QuestClientState.RewardView;
+import cn.autoforged.module_shop_quest.client.QuestClientState.TargetProgress;
+import cn.autoforged.module_shop_quest.config.ConfigModels.QuestTaskType;
 import io.github.humbleui.skija.Canvas;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,6 +51,9 @@ public final class QuestAddonPage implements AddonPage {
     private static final ScrollController PASS_H_SCROLL = new ScrollController(false);
     private static final ScrollController DAILY_V_SCROLL = new ScrollController(false);
     private static final ScrollController WEEKLY_V_SCROLL = new ScrollController(false);
+    private static final ScrollController ONLINE_DAILY_H_SCROLL = new ScrollController(false);
+    private static final ScrollController ONLINE_WEEKLY_H_SCROLL = new ScrollController(false);
+    private static final Map<String, Integer> CELL_PAGE_MAP = new HashMap<>();
     private static int activeTab = TAB_PASS;
     private static int subView = SUBVIEW_MAIN;
     private static int buyLevelDelta = 1;
@@ -71,9 +77,24 @@ public final class QuestAddonPage implements AddonPage {
     private float segY;
 
     private float passViewportX, passViewportY, passViewportW, passViewportH;
+    private float lastPassColStep = 62.0F;
     private boolean draggingPassCanvas = false;
     private double dragLastX = 0.0D;
     private double dragAccumDist = 0.0D;
+
+    // 通行证底部横向滚动条滑块拖拽状态
+    private boolean draggingPassScrubber = false;
+    private float scrubberGrabOffsetX = 0.0F;
+    private float scrubberTrackX, scrubberTrackY, scrubberTrackW, scrubberTrackH;
+    private float scrubberThumbX, scrubberThumbW;
+
+    // 在线奖励横向滚动视口与滑块拖拽状态（0=无, 1=每日, 2=每周）
+    private int draggingOnlineScrubber = 0;
+    private float onlineScrubberGrabX = 0.0F;
+    private final float[] onlineDailyVp = new float[4];
+    private final float[] onlineWeeklyVp = new float[4];
+    private final float[] onlineDailyBar = new float[6]; // trackX, trackY, trackW, trackH, thumbX, thumbW
+    private final float[] onlineWeeklyBar = new float[6];
 
     private float questViewportX, questViewportY, questViewportW, questViewportH;
 
@@ -90,7 +111,7 @@ public final class QuestAddonPage implements AddonPage {
 
     @Override
     public void init(AddonPageHost host) {
-        adminView.ensureInputInitialized(host);
+        adminView.rebindInputs(host);
         QuestClient.requestSync();
         if (subView == SUBVIEW_ADMIN) {
             QuestClient.sendFetchAdminConfig();
@@ -103,6 +124,8 @@ public final class QuestAddonPage implements AddonPage {
         PASS_H_SCROLL.update();
         DAILY_V_SCROLL.update();
         WEEKLY_V_SCROLL.update();
+        ONLINE_DAILY_H_SCROLL.update();
+        ONLINE_WEEKLY_H_SCROLL.update();
 
         float x = f.x();
         float y = f.y();
@@ -429,16 +452,17 @@ public final class QuestAddonPage implements AddonPage {
         float gridW = w - pad * 2.0F;
         float gridH = h - pad * 2.0F - scrollerBarH;
 
-        float trackHeadW = clamp(gridW * 0.16F, 66.0F, 82.0F);
-        boolean showPinnedMilestone = gridW >= 340.0F;
-        float colW = clamp(gridH * 0.21F, 50.0F, 58.0F);
+        float trackHeadW = clamp(gridW * 0.155F, 64.0F, 80.0F);
+        boolean showPinnedMilestone = gridW >= 350.0F;
+        float colW = clamp(gridH * 0.235F, 56.0F, 64.0F);
         float colGap = 4.0F;
+        lastPassColStep = colW + colGap;
         float pinW = showPinnedMilestone ? (colW + 4.0F) : 0.0F;
 
         float headH = 19.0F;
         float spineH = 11.0F;
         float tracksH = Math.max(80.0F, gridH - headH - spineH);
-        float freeH = Math.round(tracksH * 0.41F);
+        float freeH = Math.round(tracksH * 0.42F);
         float premH = tracksH - freeH;
 
         float freeY = gridY + headH;
@@ -454,7 +478,7 @@ public final class QuestAddonPage implements AddonPage {
         passViewportW = vpW;
         passViewportH = gridH;
 
-        float totalContentW = rows.size() * (colW + colGap) - colGap;
+        float totalContentW = Math.max(0.0F, rows.size() * (colW + colGap) - colGap);
         PASS_H_SCROLL.setContent(totalContentW, vpW);
         float scrollOffset = PASS_H_SCROLL.offset();
 
@@ -470,13 +494,13 @@ public final class QuestAddonPage implements AddonPage {
             items.pushClip(vpX, gridY, vpW, gridH);
         }
 
-        int rightmostVisibleLevel = 1;
+        int rightmostVisibleLevel = 0;
         for (int i = 0; i < rows.size(); i++) {
             float cx = vpX + i * (colW + colGap) - scrollOffset;
             if (cx + colW < vpX - 2.0F) continue;
             if (cx > vpX + vpW + 2.0F) break;
             PassRow r = rows.get(i);
-            if (cx + colW * 0.6F <= vpX + vpW) {
+            if (cx + colW * 0.55F <= vpX + vpW) {
                 rightmostVisibleLevel = r.level();
             }
             boolean allowHover = mx >= vpX && mx < vpX + vpW;
@@ -494,9 +518,14 @@ public final class QuestAddonPage implements AddonPage {
             PassRow pinned = findNextMilestoneRow(rows, rightmostVisibleLevel);
             float px = vpX + vpW + 4.0F;
             Draw.line(c, px - 2.0F, gridY + 2.0F, px - 2.0F, gridY + gridH - 2.0F, 1.0F, goldBorder());
-            renderSinglePassColumn(c, f, items, pinned, px + 1.0F, gridY, pinW - 2.0F, headH,
-                    freeY, freeH, spineY, spineH, premY, premH, curLv, curPts, premEnabled, premUnlocked,
-                    currency, mx, my, true, px, px + pinW);
+            if (pinned != null) {
+                renderSinglePassColumn(c, f, items, pinned, px + 1.0F, gridY, pinW - 2.0F, headH,
+                        freeY, freeH, spineY, spineH, premY, premH, curLv, curPts, premEnabled, premUnlocked,
+                        currency, mx, my, true, px, px + pinW);
+            } else {
+                renderEndMilestoneSummaryColumn(c, px + 1.0F, gridY, pinW - 2.0F, gridH,
+                        headH, rows.size(), curLv, mx, my);
+            }
         }
 
         float barY = gridY + gridH + 3.0F;
@@ -570,39 +599,32 @@ public final class QuestAddonPage implements AddonPage {
         int lvCol = milestone ? goldAccentText() : (reached ? ShopTheme.text() : ShopTheme.text2());
         V2.bold(c, lvStr, 6.1F, lvCol, cx, headY + (headH - 1.5F) / 2.0F, colW, Text.Align.CENTER);
 
-        // 2. 免费格
+        // 2. 免费格（支持 1~15+ 项物品与星币完整展示 + 格内分页翻看，绝不截断！）
         int freeBg = reached ? ShopTheme.card() : Draw.alpha(ShopTheme.text3(), ShopTheme.dark() ? 0.08F : 0.04F);
         Draw.fill(c, cx, freeY, colW, freeH, 4.0F, freeBg);
         Draw.stroke(c, cx, freeY, colW, freeH, 4.0F, 0.6F, isCurrent ? ShopTheme.accent() : ShopTheme.borderDim());
 
-        boolean freeHas = r.freeReward().money() > 0L || !r.freeReward().items().isEmpty();
+        List<SlotVisual> freeVisuals = buildPaidSlotVisuals(r.freeReward(), currency);
+        boolean freeHas = !freeVisuals.isEmpty();
         boolean freeCanClaim = reached && freeHas && !r.freeClaimed();
-
-        float slotSz = clamp(Math.min(colW - 10.0F, freeH - 18.0F), 28.0F, 37.0F);
-        float slotX = cx + (colW - slotSz) / 2.0F;
-        float slotY = freeY + (r.freeReward().money() > 0L && !r.freeReward().items().isEmpty()
-                ? Math.max(3.0F, (freeH - slotSz - 11.0F) / 2.0F)
-                : (freeH - slotSz) / 2.0F);
-
-        renderFreeCellSlot(c, f, items, r.freeReward(), slotX, slotY, slotSz,
-                reached, r.freeClaimed(), freeCanClaim, currency, mx, my, clipMinX, clipMaxX);
-
-        if (r.freeReward().money() > 0L && !r.freeReward().items().isEmpty()) {
-            String mTag = "+" + V2.money(r.freeReward().money()) + " " + currency;
-            V2.bold(c, mTag, 4.9F, r.freeClaimed() ? ShopTheme.text3() : goldAccentText(),
-                    cx + 1.5F, slotY + slotSz + 6.0F, colW - 3.0F, Text.Align.CENTER);
-        }
 
         if (freeCanClaim && mx >= clipMinX && mx < clipMaxX) {
             final int claimLv = r.level();
-            registerHit(cx, freeY, colW, freeH, () -> QuestClient.sendClaimPass(claimLv, false, false));
+            registerHit(Math.max(cx, clipMinX), freeY,
+                    Math.min(cx + colW, clipMaxX) - Math.max(cx, clipMinX), freeH,
+                    () -> QuestClient.sendClaimPass(claimLv, false, false));
         } else if (pinnedPreview && mx >= clipMinX && mx < clipMaxX) {
             final int jumpLv = r.level();
             registerHit(cx, headY, colW, headH, () -> {
-                PASS_H_SCROLL.scrollTo(Math.max(0.0F, (jumpLv - 3) * (colW + 4.0F)), true);
+                PASS_H_SCROLL.scrollTo(Math.max(0.0F, (jumpLv - 3) * lastPassColStep), true);
                 QuestClient.playClickSound(1.05F);
             });
         }
+
+        renderPassCellVisuals(c, f, items, freeVisuals,
+                (pinnedPreview ? "pfree:" : "free:") + r.level(),
+                cx + 2.0F, freeY + 2.0F, colW - 4.0F, freeH - 4.0F,
+                false, r.freeClaimed(), freeCanClaim, mx, my, clipMinX, clipMaxX);
 
         // 3. 进度脊线
         float sCy = spineY + spineH / 2.0F;
@@ -611,7 +633,7 @@ public final class QuestAddonPage implements AddonPage {
         drawDiamond(c, cx + colW / 2.0F, sCy, isCurrent ? 3.5F : 2.5F,
                 reached ? GOLD_BRIGHT : ShopTheme.border());
 
-        // 4. 进阶格（皮肤自适应柔和香槟色 / 暗紫金，双品质卡上下堆叠）
+        // 4. 进阶格（支持任意数量物品：1格大卡 / 2格竖排 / 3~15+格 2×2 网格+格内翻页，全部保留角标与附魔 Tooltip）
         Draw.gradientV(c, cx, premY, colW, premH, 4.0F,
                 reached ? featuredTop() : Draw.alpha(featuredTop(), 0.72F),
                 featuredBot());
@@ -619,34 +641,134 @@ public final class QuestAddonPage implements AddonPage {
                 milestone ? goldBorder() : ShopTheme.borderDim());
 
         if (premEnabled) {
-            boolean premHas = r.premReward().money() > 0L || !r.premReward().items().isEmpty();
+            List<SlotVisual> premVisuals = buildPaidSlotVisuals(r.premReward(), currency);
+            boolean premHas = !premVisuals.isEmpty();
             boolean premCanClaim = reached && premUnlocked && premHas && !r.premClaimed();
 
-            float pSlotSz = clamp(Math.min(colW - 10.0F, (premH - 14.0F) / 2.0F), 26.0F, 36.0F);
-            float pSlotX = cx + (colW - pSlotSz) / 2.0F;
-
-            List<SlotVisual> visuals = buildPaidSlotVisuals(r.premReward(), currency);
-            if (visuals.size() >= 2) {
-                float gapY = Math.min(5.0F, Math.max(2.5F, premH - pSlotSz * 2.0F - 8.0F));
-                float startY = premY + (premH - (pSlotSz * 2.0F + gapY)) / 2.0F;
-                renderSlotVisual(c, f, items, visuals.get(0), pSlotX, startY, pSlotSz,
-                        !premUnlocked, r.premClaimed(), premCanClaim, mx, my, clipMinX, clipMaxX);
-                renderSlotVisual(c, f, items, visuals.get(1), pSlotX, startY + pSlotSz + gapY, pSlotSz,
-                        !premUnlocked, r.premClaimed(), premCanClaim, mx, my, clipMinX, clipMaxX);
-            } else if (visuals.size() == 1) {
-                float startY = premY + (premH - pSlotSz) / 2.0F;
-                renderSlotVisual(c, f, items, visuals.get(0), pSlotX, startY, pSlotSz,
-                        !premUnlocked, r.premClaimed(), premCanClaim, mx, my, clipMinX, clipMaxX);
-            }
-
             if (mx >= clipMinX && mx < clipMaxX) {
+                float hx = Math.max(cx, clipMinX);
+                float hw = Math.min(cx + colW, clipMaxX) - hx;
                 if (premCanClaim) {
                     final int claimLv = r.level();
-                    registerHit(cx, premY, colW, premH, () -> QuestClient.sendClaimPass(claimLv, true, false));
+                    registerHit(hx, premY, hw, premH, () -> QuestClient.sendClaimPass(claimLv, true, false));
                 } else if (!premUnlocked && premHas) {
-                    registerHit(cx, premY, colW, premH, () -> {
+                    registerHit(hx, premY, hw, premH, () -> {
                         subView = SUBVIEW_UNLOCK;
                         QuestClient.playClickSound(1.05F);
+                    });
+                }
+            }
+
+            renderPassCellVisuals(c, f, items, premVisuals,
+                    (pinnedPreview ? "pprem:" : "prem:") + r.level(),
+                    cx + 2.0F, premY + 2.0F, colW - 4.0F, premH - 4.0F,
+                    !premUnlocked, r.premClaimed(), premCanClaim, mx, my, clipMinX, clipMaxX);
+        }
+    }
+
+    /**
+     * 单元格内多物品自适应展示引擎：
+     * 1 项居中大槽；2 项按高宽自动竖排或横排；3~15+ 项自动切换 2 列紧凑网格 + 底部小翻页器（翻页按钮命中优先于领奖）。
+     */
+    private void renderPassCellVisuals(Canvas c, AddonFrame f, ItemOverlay items,
+                                       List<SlotVisual> visuals, String pageKey,
+                                       float x, float y, float w, float h,
+                                       boolean locked, boolean claimed, boolean claimable,
+                                       float mx, float my, float clipMinX, float clipMaxX) {
+        if (visuals == null || visuals.isEmpty() || w <= 8.0F || h <= 12.0F) {
+            return;
+        }
+        int total = visuals.size();
+        if (total == 1) {
+            float sz = clamp(Math.min(w - 4.0F, h - 4.0F), 24.0F, 36.0F);
+            renderSlotVisual(c, f, items, visuals.get(0),
+                    x + (w - sz) / 2.0F, y + (h - sz) / 2.0F, sz,
+                    locked, claimed, claimable, mx, my, clipMinX, clipMaxX);
+            return;
+        }
+        if (total == 2) {
+            if (h >= 62.0F) {
+                float sz = clamp(Math.min(w - 4.0F, (h - 6.0F) / 2.0F), 22.0F, 35.0F);
+                float gapY = Math.min(4.0F, Math.max(2.0F, h - sz * 2.0F - 2.0F));
+                float sx = x + (w - sz) / 2.0F;
+                float sy = y + (h - (sz * 2.0F + gapY)) / 2.0F;
+                renderSlotVisual(c, f, items, visuals.get(0), sx, sy, sz,
+                        locked, claimed, claimable, mx, my, clipMinX, clipMaxX);
+                renderSlotVisual(c, f, items, visuals.get(1), sx, sy + sz + gapY, sz,
+                        locked, claimed, claimable, mx, my, clipMinX, clipMaxX);
+            } else {
+                float gapX = 2.5F;
+                float sz = clamp(Math.min((w - gapX) / 2.0F, h - 3.0F), 20.0F, 28.0F);
+                float rowW = sz * 2.0F + gapX;
+                float sx = x + (w - rowW) / 2.0F;
+                float sy = y + (h - sz) / 2.0F;
+                renderSlotVisual(c, f, items, visuals.get(0), sx, sy, sz,
+                        locked, claimed, claimable, mx, my, clipMinX, clipMaxX);
+                renderSlotVisual(c, f, items, visuals.get(1), sx + sz + gapX, sy, sz,
+                        locked, claimed, claimable, mx, my, clipMinX, clipMaxX);
+            }
+            return;
+        }
+
+        // >= 3 项：2 列网格（高格支持 2×2=4 项/页，矮格支持 2×1=2 项/页）+ 超页时显示底部迷你翻页条
+        int cols = 2;
+        int rowsPerPage = (h >= 64.0F) ? 2 : 1;
+        int pageSize = cols * rowsPerPage;
+        int pageCount = (total + pageSize - 1) / pageSize;
+        boolean showPager = pageCount > 1;
+        float pagerH = showPager ? 10.5F : 0.0F;
+        float bodyH = Math.max(20.0F, h - pagerH - (showPager ? 1.5F : 0.0F));
+
+        int curPage = Math.max(0, Math.min(pageCount - 1, CELL_PAGE_MAP.getOrDefault(pageKey, 0)));
+        float gapX = 2.0F;
+        float gapY = 2.0F;
+        float szW = (w - gapX) / cols;
+        float szH = (bodyH - (rowsPerPage - 1) * gapY) / rowsPerPage;
+        float sz = clamp(Math.min(szW, szH), 19.0F, 28.0F);
+        float gridW = cols * sz + (cols - 1) * gapX;
+        float gridH = rowsPerPage * sz + (rowsPerPage - 1) * gapY;
+        float gx = x + (w - gridW) / 2.0F;
+        float gy = y + Math.max(0.0F, (bodyH - gridH) / 2.0F);
+
+        int start = curPage * pageSize;
+        int end = Math.min(total, start + pageSize);
+        for (int i = start; i < end; i++) {
+            int local = i - start;
+            int rr = local / cols;
+            int cc = local % cols;
+            float sx = gx + cc * (sz + gapX);
+            float sy = gy + rr * (sz + gapY);
+            renderSlotVisual(c, f, items, visuals.get(i), sx, sy, sz,
+                    locked, claimed, claimable, mx, my, clipMinX, clipMaxX);
+        }
+
+        if (showPager) {
+            float py = y + h - pagerH;
+            float btnW = 11.0F;
+            boolean inClip = mx >= clipMinX && mx < clipMaxX;
+            boolean overL = inClip && inRect(mx, my, x, py, btnW, pagerH);
+            boolean overR = inClip && inRect(mx, my, x + w - btnW, py, btnW, pagerH);
+            drawMiniStepBtn(c, "‹", x, py, btnW, pagerH, overL);
+            drawMiniStepBtn(c, "›", x + w - btnW, py, btnW, pagerH, overR);
+            V2.bold(c, (curPage + 1) + "/" + pageCount, 4.7F, ShopTheme.text2(),
+                    x + btnW, py + pagerH / 2.0F, Math.max(8.0F, w - btnW * 2.0F), Text.Align.CENTER);
+            if (inClip) {
+                final int prevP = (curPage - 1 + pageCount) % pageCount;
+                final int nextP = (curPage + 1) % pageCount;
+                float lx1 = Math.max(x, clipMinX);
+                float lx2 = Math.min(x + btnW, clipMaxX);
+                if (lx2 > lx1) {
+                    registerHit(lx1, py, lx2 - lx1, pagerH, () -> {
+                        CELL_PAGE_MAP.put(pageKey, prevP);
+                        QuestClient.playClickSound(1.04F);
+                    });
+                }
+                float rx1 = Math.max(x + w - btnW, clipMinX);
+                float rx2 = Math.min(x + w, clipMaxX);
+                if (rx2 > rx1) {
+                    registerHit(rx1, py, rx2 - rx1, pagerH, () -> {
+                        CELL_PAGE_MAP.put(pageKey, nextP);
+                        QuestClient.playClickSound(1.04F);
                     });
                 }
             }
@@ -654,12 +776,45 @@ public final class QuestAddonPage implements AddonPage {
     }
 
     private PassRow findNextMilestoneRow(List<PassRow> rows, int afterLevel) {
+        if (rows.isEmpty()) {
+            return null;
+        }
+        int lastLevel = rows.get(rows.size() - 1).level();
+        if (afterLevel >= lastLevel) {
+            return null;
+        }
         for (PassRow r : rows) {
             if (r.level() > afterLevel && r.highlight()) {
                 return r;
             }
         }
         return rows.get(rows.size() - 1);
+    }
+
+    /** 滚至满级末尾时替代重复 30 级预览列，避免右侧出现两个相同等级柱。 */
+    private void renderEndMilestoneSummaryColumn(Canvas c, float x, float y, float w, float h,
+                                                 float headH, int totalLevels, int curLv, float mx, float my) {
+        Draw.fill(c, x, y, w, headH - 1.5F, 4.0F, Draw.alpha(ShopTheme.accent(), ShopTheme.dark() ? 0.16F : 0.10F));
+        V2.bold(c, "已至末级", 5.8F, goldAccentText(), x, y + (headH - 1.5F) / 2.0F, w, Text.Align.CENTER);
+
+        float bodyY = y + headH;
+        float bodyH = Math.max(40.0F, h - headH);
+        Draw.gradientV(c, x, bodyY, w, bodyH, 4.0F, featuredTop(), featuredBot());
+        Draw.stroke(c, x, bodyY, w, bodyH, 4.0F, 0.7F, goldBorder());
+
+        drawVectorCrestEmblem(c, x + w / 2.0F, bodyY + bodyH * 0.30F, Math.min(13.0F, w * 0.24F), goldAccentText(), false);
+        V2.bold(c, "共 " + totalLevels + " 级", 6.2F, ShopTheme.text(), x + 2.0F, bodyY + bodyH * 0.56F, w - 4.0F, Text.Align.CENTER);
+        V2.text(c, "当前 Lv." + curLv, 5.2F, ShopTheme.text2(), x + 2.0F, bodyY + bodyH * 0.69F, w - 4.0F, Text.Align.CENTER);
+
+        float bw = w - 8.0F;
+        float bh = 16.0F;
+        float bx = x + 4.0F;
+        float by = bodyY + bodyH - bh - 6.0F;
+        drawMiniStepBtn(c, "回当前级", bx, by, bw, bh, inRect(mx, my, bx, by, bw, bh));
+        registerHit(bx, by, bw, bh, () -> {
+            PASS_H_SCROLL.scrollTo(Math.max(0.0F, (Math.max(1, curLv) - 2) * lastPassColStep), true);
+            QuestClient.playClickSound(1.05F);
+        });
     }
 
     private void renderPassHorizontalScrubber(Canvas c, float x, float y, float w, float h,
@@ -677,7 +832,7 @@ public final class QuestAddonPage implements AddonPage {
         drawMiniStepBtn(c, jumpLbl, jx, y, jw, h, inRect(mx, my, jx, y, jw, h));
         registerHit(jx, y, jw, h, () -> {
             int curLv = Math.max(1, QuestClientState.currentLevel());
-            PASS_H_SCROLL.scrollTo(Math.max(0.0F, (curLv - 2) * 58.0F), true);
+            PASS_H_SCROLL.scrollTo(Math.max(0.0F, (curLv - 2) * lastPassColStep), true);
             QuestClient.playClickSound(1.05F);
         });
 
@@ -691,18 +846,26 @@ public final class QuestAddonPage implements AddonPage {
         float trackX = x + btnW + 4.0F;
         float trackW = Math.max(30.0F, rx - trackX - 4.0F);
         float trackCy = y + h / 2.0F;
+        scrubberTrackX = trackX;
+        scrubberTrackY = y;
+        scrubberTrackW = trackW;
+        scrubberTrackH = h;
+
         Draw.fill(c, trackX, trackCy - 2.0F, trackW, 4.0F, 2.0F,
                 Draw.alpha(ShopTheme.text3(), ShopTheme.dark() ? 0.22F : 0.14F));
         if (PASS_H_SCROLL.maxScroll() > 1.0F && contentW > 0.0F) {
             float thumbRatio = clamp(vpW / contentW, 0.08F, 1.0F);
-            float thumbW = Math.max(18.0F, trackW * thumbRatio);
+            float thumbW = Math.max(20.0F, trackW * thumbRatio);
             float pct = clamp(PASS_H_SCROLL.offset() / PASS_H_SCROLL.maxScroll(), 0.0F, 1.0F);
             float thumbX = trackX + (trackW - thumbW) * pct;
-            Draw.gradientH(c, thumbX, trackCy - 2.0F, thumbW, 4.0F, 2.0F, ShopTheme.accent(), GOLD_BRIGHT);
-            registerHit(trackX, y, trackW, h, () -> {
-                float clickPct = clamp((mx - trackX - thumbW / 2.0F) / Math.max(1.0F, trackW - thumbW), 0.0F, 1.0F);
-                PASS_H_SCROLL.scrollTo(clickPct * PASS_H_SCROLL.maxScroll(), true);
-            });
+            scrubberThumbX = thumbX;
+            scrubberThumbW = thumbW;
+            boolean activeThumb = draggingPassScrubber || inRect(mx, my, thumbX - 2.0F, y - 1.0F, thumbW + 4.0F, h + 2.0F);
+            float th = activeThumb ? 5.6F : 4.2F;
+            Draw.gradientH(c, thumbX, trackCy - th / 2.0F, thumbW, th, th / 2.0F, ShopTheme.accent(), GOLD_BRIGHT);
+        } else {
+            scrubberThumbX = trackX;
+            scrubberThumbW = trackW;
         }
     }
 
@@ -1155,9 +1318,17 @@ public final class QuestAddonPage implements AddonPage {
         float gapX = 8.0F;
         float gapY = 8.0F;
         float cardW = (iw - gapX * (cols - 1)) / cols;
+        boolean hasMulti = false;
+        for (QuestRow r : rows) {
+            if (r.targets().size() > 1) {
+                hasMulti = true;
+                break;
+            }
+        }
+        float minCardH = hasMulti ? 104.0F : 92.0F;
         float naturalCardH = numRows <= 2
-                ? clamp((gridH - gapY * Math.max(0, numRows - 1)) / Math.max(1, numRows), 84.0F, 134.0F)
-                : 90.0F;
+                ? clamp((gridH - gapY * Math.max(0, numRows - 1)) / Math.max(1, numRows), minCardH, 138.0F)
+                : minCardH;
         float contentH = numRows * naturalCardH + Math.max(0, numRows - 1) * gapY;
         scroll.setContent(contentH, gridH);
         float offsetY = scroll.offset();
@@ -1273,35 +1444,85 @@ public final class QuestAddonPage implements AddonPage {
         float topCy = y + 14.0F;
         float tagW = V2.tag(c, sourceLabel(r.requiredMod(), r.period()), catColor, innerX, topCy);
 
-        List<SlotVisual> rewards = buildQuestRewardVisuals(r.reward(), f.host().currencyName());
-        float rSlotSz = clamp(h * 0.33F, 26.0F, 32.0F);
-        float totalRw = rewards.size() * (rSlotSz + 4.0F) - 4.0F;
+        List<SlotVisual> rewards = buildPaidSlotVisuals(r.reward(), f.host().currencyName());
+        float rSlotSz = clamp(h * 0.30F, 24.0F, 30.0F);
+        int maxInlineSlots = Math.min(rewards.size(), Math.max(1, (int) ((w * 0.44F) / (rSlotSz + 3.0F))));
+        float totalRw = maxInlineSlots * (rSlotSz + 3.0F) - 3.0F;
         float rStartX = x + w - 9.0F - totalRw;
         float rSlotY = y + 8.0F;
-        for (int i = 0; i < rewards.size(); i++) {
+        for (int i = 0; i < maxInlineSlots; i++) {
             renderSlotVisual(c, f, items, rewards.get(i),
-                    rStartX + i * (rSlotSz + 4.0F), rSlotY, rSlotSz,
+                    rStartX + i * (rSlotSz + 3.0F), rSlotY, rSlotSz,
                     false, r.claimed(), canClaim, mx, my, x, x + w);
+        }
+        if (rewards.size() > maxInlineSlots) {
+            String more = "+" + (rewards.size() - maxInlineSlots);
+            V2.bold(c, more, 4.8F, goldAccentText(), rStartX, rSlotY + rSlotSz + 4.5F, totalRw, Text.Align.RIGHT);
         }
 
         float textMaxW = Math.max(60.0F, rStartX - (innerX + tagW + 6.0F) - 6.0F);
         V2.bold(c, r.title(), 8.0F, r.invalidated() ? ShopTheme.text3() : ShopTheme.text(),
                 innerX + tagW + 5.0F, topCy, textMaxW, Text.Align.LEFT);
 
-        if (r.desc() != null && !r.desc().isBlank()) {
-            var descLayout = Text.wrapped(r.desc(), ShopTheme.regular(), 6.0F,
-                    ShopTheme.text2(), Math.max(80.0F, rStartX - innerX - 8.0F), 2);
-            Text.draw(c, descLayout, innerX, y + 25.0F);
-        }
-
-        float btnW = 64.0F;
+        float descTop = y + 24.0F;
+        float btnW = 66.0F;
         float btnH = 18.0F;
         float btnX = x + w - 9.0F - btnW;
-        float btnY = y + h - btnH - 8.0F;
+        float btnY = y + h - btnH - 7.0F;
+
+        List<TargetProgress> subTargets = r.targets();
+        boolean showSubTargets = subTargets != null && (subTargets.size() > 1
+                || (subTargets.size() == 1 && !subTargets.get(0).target().isBlank() && !"*".equals(subTargets.get(0).target())));
+
+        if (r.desc() != null && !r.desc().isBlank()) {
+            var descLayout = Text.wrapped(r.desc(), ShopTheme.regular(), 5.8F,
+                    ShopTheme.text2(), Math.max(80.0F, rStartX - innerX - 8.0F), showSubTargets ? 1 : 2);
+            Text.draw(c, descLayout, innerX, descTop);
+            descTop += showSubTargets ? 12.0F : 22.0F;
+        }
+
+        // 多子目标明细胶囊（如 僵尸 3/5 · 骷髅 2/3）
+        if (showSubTargets) {
+            QuestTaskType qt = QuestTaskType.fromName(r.taskType());
+            QuestTargetCatalog.Kind tKind = resolveKindForType(qt);
+            float chipX = innerX;
+            float chipY = Math.max(descTop, y + 36.0F);
+            float maxChipRight = x + w - 10.0F;
+            float maxChipBottom = btnY - 5.0F;
+            int shown = 0;
+            for (int ti = 0; ti < subTargets.size(); ti++) {
+                TargetProgress tp = subTargets.get(ti);
+                String name = (tp.label() != null && !tp.label().isBlank())
+                        ? tp.label()
+                        : QuestTargetCatalog.resolveDisplayName(tKind, tp.target(),
+                        QuestClientState.syncedBiomes(), QuestClientState.syncedStructures(),
+                        QuestClientState.worldRegistryRevision());
+                String txt = (tp.completed() ? "✓ " : "") + name + " " + tp.progress() + "/" + tp.count();
+                float cw = Math.min(maxChipRight - innerX, V2.width(txt, 5.1F, true) + 9.0F);
+                if (chipX + cw > maxChipRight && chipX > innerX) {
+                    chipX = innerX;
+                    chipY += 13.5F;
+                }
+                if (chipY + 12.0F > maxChipBottom) {
+                    break;
+                }
+                int col = tp.completed() ? ShopTheme.green() : ShopTheme.accent();
+                Draw.fill(c, chipX, chipY, cw, 11.5F, 3.0F, Draw.alpha(col, ShopTheme.dark() ? 0.22F : 0.12F));
+                Draw.stroke(c, chipX, chipY, cw, 11.5F, 3.0F, 0.5F, Draw.alpha(col, 0.45F));
+                V2.bold(c, txt, 5.0F, tp.completed() ? ShopTheme.green() : ShopTheme.text(),
+                        chipX + 3.0F, chipY + 5.75F, cw - 6.0F, Text.Align.LEFT);
+                chipX += cw + 3.5F;
+                shown++;
+            }
+            if (shown < subTargets.size() && chipY + 11.5F <= maxChipBottom) {
+                String remTxt = "+" + (subTargets.size() - shown) + "项";
+                V2.text(c, remTxt, 5.0F, ShopTheme.text3(), chipX, chipY + 5.75F, 32.0F, Text.Align.LEFT);
+            }
+        }
 
         float barX = innerX;
-        float barW = Math.max(50.0F, btnX - barX - 12.0F);
-        float barCy = btnY + btnH * 0.65F;
+        float barW = Math.max(50.0F, btnX - barX - 10.0F);
+        float barCy = btnY + btnH * 0.68F;
         float pct = clamp((float) r.progress() / (float) Math.max(1, r.target()), 0.0F, 1.0F);
 
         V2.bold(c, r.progress() + " / " + r.target(), 5.8F, r.completed() ? ShopTheme.green() : ShopTheme.text2(),
@@ -1326,6 +1547,10 @@ public final class QuestAddonPage implements AddonPage {
             V2.button(c, tr("gui.module_shop_quest.btn_claim"), V2.Btn.PRIMARY, btnX, btnY, btnW, btnH,
                     inRect(mx, my, btnX, btnY, btnW, btnH) ? 1.0F : 0.0F);
             registerHit(btnX, btnY, btnW, btnH, () -> QuestClient.sendClaimQuest(r.period(), r.id()));
+        } else if (r.canSubmit()) {
+            V2.button(c, tr("gui.module_shop_quest.btn_submit_item"), V2.Btn.PRIMARY, btnX, btnY, btnW, btnH,
+                    inRect(mx, my, btnX, btnY, btnW, btnH) ? 1.0F : 0.0F);
+            registerHit(btnX, btnY, btnW, btnH, () -> QuestClient.sendSubmitQuestItem(r.period(), r.id(), -1));
         } else {
             V2.button(c, tr("gui.module_shop_quest.state_ongoing"), V2.Btn.DISABLED, btnX, btnY, btnW, btnH, 0.0F);
         }
@@ -1382,10 +1607,12 @@ public final class QuestAddonPage implements AddonPage {
         int dayMaxTarget = daily.isEmpty() ? 60 : daily.get(daily.size() - 1).reqMin();
         boolean paused = QuestClientState.afkPaused() && QuestClientState.showAfkHint();
 
+        String afkLbl = paused ? tr("gui.module_shop_quest.afk_paused_tag") : tr("gui.module_shop_quest.afk_active_tag");
+        float afkW = V2.tagWidth(afkLbl);
+        float afkX = x + cardW - afkW - 10.0F;
         V2.bold(c, "今日在线：" + dayMin + " 分钟", 9.0F, ShopTheme.text(),
-                x + 12.0F, y + h * 0.32F, cardW * 0.65F, Text.Align.LEFT);
-        V2.tag(c, paused ? tr("gui.module_shop_quest.afk_paused_tag") : tr("gui.module_shop_quest.afk_active_tag"),
-                paused ? ShopTheme.gold() : ShopTheme.green(), x + cardW - 72.0F, y + h * 0.32F);
+                x + 12.0F, y + h * 0.32F, Math.max(60.0F, afkX - (x + 18.0F)), Text.Align.LEFT);
+        V2.tag(c, afkLbl, paused ? ShopTheme.gold() : ShopTheme.green(), afkX, y + h * 0.32F);
 
         if (graceCount > 0) {
             float gw = 74.0F;
@@ -1442,26 +1669,83 @@ public final class QuestAddonPage implements AddonPage {
             Draw.stroke(c, x, y, w, h, 6.0F, 0.7F, ShopTheme.borderDim());
         }
 
-        V2.bold(c, sectionTitle, 7.2F, ShopTheme.text(), x + 12.0F, y + 11.5F, w - 24.0F, Text.Align.LEFT);
-        if (tiers.isEmpty()) return;
+        ScrollController hScroll = isWeekly ? ONLINE_WEEKLY_H_SCROLL : ONLINE_DAILY_H_SCROLL;
+        float[] vpOut = isWeekly ? onlineWeeklyVp : onlineDailyVp;
+        float[] barOut = isWeekly ? onlineWeeklyBar : onlineDailyBar;
 
-        float cardsTop = y + 21.0F;
-        float cardsH = Math.max(54.0F, h - 26.0F);
+        V2.bold(c, sectionTitle + (tiers.size() > 4 ? ("（共 " + tiers.size() + " 档）") : ""),
+                7.0F, ShopTheme.text(), x + 12.0F, y + 11.5F, w - 90.0F, Text.Align.LEFT);
+        if (tiers.isEmpty()) {
+            vpOut[2] = 0.0F;
+            barOut[2] = 0.0F;
+            return;
+        }
+
         float padX = 10.0F;
-        float gap = 10.0F;
+        float gap = 8.0F;
+        float vpX = x + padX;
+        float vpW = Math.max(80.0F, w - padX * 2.0F);
         int n = tiers.size();
-        float cardW = (w - padX * 2.0F - gap * (n - 1)) / n;
+        float minCardW = 108.0F;
+        float evenCardW = (vpW - gap * (n - 1)) / n;
+        boolean needScroll = evenCardW < minCardW;
+        float cardW = needScroll ? minCardW : evenCardW;
+        float totalContentW = n * cardW + Math.max(0, n - 1) * gap;
+        hScroll.setContent(totalContentW, vpW);
 
-        float nodeY = cardsTop + 11.0F;
-        Draw.line(c, x + padX + cardW * 0.5F, nodeY, x + w - padX - cardW * 0.5F, nodeY,
-                2.0F, Draw.alpha(isWeekly ? GOLD_BORDER_LIGHT : ShopTheme.accent(), 0.28F));
+        float scrollBarH = needScroll ? 9.0F : 0.0F;
+        float cardsTop = y + 20.0F;
+        float cardsH = Math.max(54.0F, h - 24.0F - scrollBarH);
+        vpOut[0] = vpX;
+        vpOut[1] = cardsTop;
+        vpOut[2] = vpW;
+        vpOut[3] = cardsH + scrollBarH;
+
+        // 当档位较多（如 5~12 档）时，在右上角提供左右快翻按钮，彻底杜绝卡片挤扁与奖励跨格重叠！
+        if (needScroll) {
+            float stepW = 15.0F;
+            float stepY = y + 4.5F;
+            float rBtnX = x + w - padX - stepW;
+            float lBtnX = rBtnX - stepW - 3.0F;
+            drawMiniStepBtn(c, "‹", lBtnX, stepY, stepW, 13.0F, inRect(mx, my, lBtnX, stepY, stepW, 13.0F));
+            registerHit(lBtnX, stepY, stepW, 13.0F, () -> {
+                hScroll.scrollTo(Math.max(0.0F, hScroll.offset() - (cardW + gap) * 2.0F), true);
+                QuestClient.playClickSound(1.03F);
+            });
+            drawMiniStepBtn(c, "›", rBtnX, stepY, stepW, 13.0F, inRect(mx, my, rBtnX, stepY, stepW, 13.0F));
+            registerHit(rBtnX, stepY, stepW, 13.0F, () -> {
+                hScroll.scrollTo(Math.min(hScroll.maxScroll(), hScroll.offset() + (cardW + gap) * 2.0F), true);
+                QuestClient.playClickSound(1.03F);
+            });
+        }
+
+        float offX = hScroll.offset();
+        int saveTrack = c.save();
+        Draw.clip(c, vpX, cardsTop, vpW, cardsH);
+        if (items != null) {
+            items.pushClip(vpX, cardsTop, vpW, cardsH);
+        }
+
+        float nodeY = cardsTop + 10.5F;
+        float lineStart = vpX + cardW * 0.5F - offX;
+        float lineEnd = vpX + totalContentW - cardW * 0.5F - offX;
+        if (n > 1) {
+            Draw.line(c, lineStart, nodeY, lineEnd, nodeY,
+                    2.0F, Draw.alpha(isWeekly ? GOLD_BORDER_LIGHT : ShopTheme.accent(), 0.28F));
+        }
 
         String currency = f.host().currencyName();
         for (int i = 0; i < n; i++) {
+            float cx = vpX + i * (cardW + gap) - offX;
+            if (cx + cardW < vpX - 2.0F) continue;
+            if (cx > vpX + vpW + 2.0F) break;
+
             OnlineRow r = tiers.get(i);
-            float cx = x + padX + i * (cardW + gap);
             boolean done = r.completed();
             boolean canClaim = r.claimable();
+            boolean allowHover = mx >= vpX && mx < vpX + vpW;
+            float lmx = allowHover ? mx : -9999.0F;
+            float lmy = allowHover ? my : -9999.0F;
 
             int cBg = done
                     ? Draw.lerp(ShopTheme.card(), ShopTheme.accentTint(), 0.30F)
@@ -1470,36 +1754,148 @@ public final class QuestAddonPage implements AddonPage {
             Draw.stroke(c, cx, cardsTop, cardW, cardsH, 5.5F, canClaim ? 1.2F : 0.7F,
                     canClaim ? goldBorder() : ShopTheme.borderDim());
 
-            float nodeCx = cx + cardW / 2.0F;
-            drawDiamond(c, nodeCx - V2.width(r.reqMin() + " 分钟", 6.4F, true) / 2.0F - 6.0F, nodeY,
-                    2.6F, done ? GOLD_BRIGHT : ShopTheme.text3());
-            V2.bold(c, r.reqMin() + " 分钟", 6.6F, done ? ShopTheme.accent() : ShopTheme.text(),
-                    cx + 6.0F, nodeY, cardW - 12.0F, Text.Align.CENTER);
-
-            List<SlotVisual> visuals = buildQuestRewardVisuals(r.reward(), currency);
-            float slotSz = clamp(cardsH * 0.38F, 24.0F, 34.0F);
-            float rowW = visuals.size() * (slotSz + 5.0F) - 5.0F;
-            float sx = cx + (cardW - rowW) / 2.0F;
-            float sy = cardsTop + 20.0F + Math.max(0.0F, (cardsH - 44.0F - slotSz) / 2.0F);
-            for (int k = 0; k < visuals.size(); k++) {
-                renderSlotVisual(c, f, items, visuals.get(k),
-                        sx + k * (slotSz + 5.0F), sy, slotSz, false, r.claimed(), canClaim, mx, my, cx, cx + cardW);
+            // 卡片内严格裁剪：杜绝任何奖励图标戳出卡片边界或遮挡按钮！
+            float clipMinX = Math.max(cx + 2.0F, vpX);
+            float clipMaxX = Math.min(cx + cardW - 2.0F, vpX + vpW);
+            int saveCard = c.save();
+            Draw.clip(c, clipMinX, cardsTop + 1.0F, Math.max(0.0F, clipMaxX - clipMinX), cardsH - 2.0F);
+            if (items != null) {
+                items.pushClip(clipMinX, cardsTop + 1.0F, Math.max(0.0F, clipMaxX - clipMinX), cardsH - 2.0F);
             }
 
-            float btnH = clamp(cardsH * 0.21F, 16.0F, 19.0F);
-            float btnW = Math.min(cardW - 16.0F, 110.0F);
+            float nodeCx = cx + cardW / 2.0F;
+            String minLbl = r.reqMin() + " 分钟";
+            drawDiamond(c, nodeCx - V2.width(minLbl, 6.2F, true) / 2.0F - 5.5F, nodeY,
+                    2.4F, done ? GOLD_BRIGHT : ShopTheme.text3());
+            V2.bold(c, minLbl, 6.4F, done ? ShopTheme.accent() : ShopTheme.text(),
+                    cx + 5.0F, nodeY, cardW - 10.0F, Text.Align.CENTER);
+
+            float btnH = clamp(cardsH * 0.20F, 15.0F, 18.0F);
+            float btnW = Math.min(cardW - 12.0F, 100.0F);
             float bx = cx + (cardW - btnW) / 2.0F;
-            float by = cardsTop + cardsH - btnH - 5.0F;
+            float by = cardsTop + cardsH - btnH - 4.0F;
+
+            // 奖励区严格限定在标题下沿与底部按钮上沿之间，超宽自动分页
+            float slotAreaTop = cardsTop + 19.0F;
+            float slotAreaH = Math.max(20.0F, by - slotAreaTop - 3.0F);
+            List<SlotVisual> visuals = buildPaidSlotVisuals(r.reward(), currency);
+            renderOnlineCardVisuals(c, f, items, visuals, "online:" + r.period() + ":" + r.id(),
+                    cx + 4.0F, slotAreaTop, cardW - 8.0F, slotAreaH,
+                    r.claimed(), canClaim, lmx, lmy, clipMinX, clipMaxX);
 
             if (r.claimed()) {
                 V2.button(c, "✓ 已领取", V2.Btn.DISABLED, bx, by, btnW, btnH, 0.0F);
             } else if (canClaim) {
                 V2.button(c, tr("gui.module_shop_quest.btn_claim"), V2.Btn.PRIMARY, bx, by, btnW, btnH,
-                        inRect(mx, my, bx, by, btnW, btnH) ? 1.0F : 0.0F);
-                registerHit(bx, by, btnW, btnH, () -> QuestClient.sendClaimOnline(r.period(), r.id()));
+                        inRect(lmx, lmy, bx, by, btnW, btnH) ? 1.0F : 0.0F);
+                if (clipMaxX > clipMinX) {
+                    float hbx = Math.max(bx, clipMinX);
+                    float hbw = Math.min(bx + btnW, clipMaxX) - hbx;
+                    registerHit(hbx, by, hbw, btnH, () -> QuestClient.sendClaimOnline(r.period(), r.id()));
+                }
             } else {
                 int diff = Math.max(1, r.reqMin() - r.currentMin());
-                V2.button(c, "还差 " + diff + " 分钟", V2.Btn.DISABLED, bx, by, btnW, btnH, 0.0F);
+                V2.button(c, "差 " + diff + " 分", V2.Btn.DISABLED, bx, by, btnW, btnH, 0.0F);
+            }
+
+            if (items != null) {
+                items.popClip();
+            }
+            c.restoreToCount(saveCard);
+        }
+
+        if (items != null) {
+            items.popClip();
+        }
+        c.restoreToCount(saveTrack);
+
+        // 底部迷你横向滚动条（支持直接拖拽滑块！）
+        if (needScroll && hScroll.maxScroll() > 1.0F) {
+            float barY = cardsTop + cardsH + 2.5F;
+            float barH = 6.0F;
+            float barCy = barY + barH / 2.0F;
+            Draw.fill(c, vpX, barCy - 1.5F, vpW, 3.0F, 1.5F,
+                    Draw.alpha(ShopTheme.text3(), ShopTheme.dark() ? 0.22F : 0.14F));
+            float thumbRatio = clamp(vpW / totalContentW, 0.10F, 1.0F);
+            float thumbW = Math.max(20.0F, vpW * thumbRatio);
+            float pct = clamp(hScroll.offset() / hScroll.maxScroll(), 0.0F, 1.0F);
+            float thumbX = vpX + (vpW - thumbW) * pct;
+            boolean draggingThis = draggingOnlineScrubber == (isWeekly ? 2 : 1);
+            boolean active = draggingThis || inRect(mx, my, thumbX - 2.0F, barY - 1.0F, thumbW + 4.0F, barH + 2.0F);
+            float th = active ? 4.4F : 3.2F;
+            Draw.gradientH(c, thumbX, barCy - th / 2.0F, thumbW, th, th / 2.0F, ShopTheme.accent(), GOLD_BRIGHT);
+            barOut[0] = vpX;
+            barOut[1] = barY;
+            barOut[2] = vpW;
+            barOut[3] = barH;
+            barOut[4] = thumbX;
+            barOut[5] = thumbW;
+        } else {
+            barOut[2] = 0.0F;
+        }
+    }
+
+    /** 在线档位卡片内多奖励槽排版：绝不越界、绝不与下方领取按钮重叠，超量支持卡片内小翻页。 */
+    private void renderOnlineCardVisuals(Canvas c, AddonFrame f, ItemOverlay items,
+                                         List<SlotVisual> visuals, String pageKey,
+                                         float x, float y, float w, float h,
+                                         boolean claimed, boolean claimable,
+                                         float mx, float my, float clipMinX, float clipMaxX) {
+        if (visuals == null || visuals.isEmpty() || w <= 12.0F || h <= 14.0F) {
+            return;
+        }
+        float gap = 3.0F;
+        float maxSlotH = Math.min(30.0F, h - 2.0F);
+        int maxPerRow = Math.max(1, (int) ((w + gap) / (22.0F + gap)));
+        boolean needPager = visuals.size() > maxPerRow;
+        float pagerH = needPager ? 10.0F : 0.0F;
+        float slotAreaH = Math.max(18.0F, h - pagerH - (needPager ? 1.5F : 0.0F));
+        int pageSize = Math.max(1, Math.min(visuals.size(), maxPerRow));
+        int pageCount = (visuals.size() + pageSize - 1) / pageSize;
+        int curPage = Math.max(0, Math.min(pageCount - 1, CELL_PAGE_MAP.getOrDefault(pageKey, 0)));
+
+        int start = curPage * pageSize;
+        int end = Math.min(visuals.size(), start + pageSize);
+        int shown = end - start;
+
+        float slotSz = clamp(Math.min((w - (shown - 1) * gap) / shown, Math.min(maxSlotH, slotAreaH)), 18.0F, 30.0F);
+        float rowW = shown * slotSz + (shown - 1) * gap;
+        float sx = x + (w - rowW) / 2.0F;
+        float sy = y + Math.max(0.0F, (slotAreaH - slotSz) / 2.0F);
+
+        for (int i = start; i < end; i++) {
+            renderSlotVisual(c, f, items, visuals.get(i),
+                    sx + (i - start) * (slotSz + gap), sy, slotSz,
+                    false, claimed, claimable, mx, my, clipMinX, clipMaxX);
+        }
+
+        if (needPager) {
+            float py = y + h - pagerH;
+            float bw = 12.0F;
+            boolean inClip = mx >= clipMinX && mx < clipMaxX;
+            drawMiniStepBtn(c, "‹", x, py, bw, pagerH, inClip && inRect(mx, my, x, py, bw, pagerH));
+            drawMiniStepBtn(c, "›", x + w - bw, py, bw, pagerH, inClip && inRect(mx, my, x + w - bw, py, bw, pagerH));
+            V2.bold(c, (curPage + 1) + "/" + pageCount, 4.6F, ShopTheme.text2(),
+                    x + bw, py + pagerH / 2.0F, Math.max(8.0F, w - bw * 2.0F), Text.Align.CENTER);
+            if (inClip) {
+                final int prevP = (curPage - 1 + pageCount) % pageCount;
+                final int nextP = (curPage + 1) % pageCount;
+                float lx1 = Math.max(x, clipMinX);
+                float lx2 = Math.min(x + bw, clipMaxX);
+                if (lx2 > lx1) {
+                    registerHit(lx1, py, lx2 - lx1, pagerH, () -> {
+                        CELL_PAGE_MAP.put(pageKey, prevP);
+                        QuestClient.playClickSound(1.04F);
+                    });
+                }
+                float rx1 = Math.max(x + w - bw, clipMinX);
+                float rx2 = Math.min(x + w, clipMaxX);
+                if (rx2 > rx1) {
+                    registerHit(rx1, py, rx2 - rx1, pagerH, () -> {
+                        CELL_PAGE_MAP.put(pageKey, nextP);
+                        QuestClient.playClickSound(1.04F);
+                    });
+                }
             }
         }
     }
@@ -1873,6 +2269,30 @@ public final class QuestAddonPage implements AddonPage {
             }
         }
 
+        // 1. 优先响应通行证底部横向滚动条滑块按住拖动 / 轨道点击
+        if (subView == SUBVIEW_MAIN && activeTab == TAB_PASS
+                && PASS_H_SCROLL.maxScroll() > 1.0F
+                && inRect((float) mx, (float) my, scrubberTrackX, scrubberTrackY - 2.0F, scrubberTrackW, scrubberTrackH + 4.0F)) {
+            if (mx >= scrubberThumbX - 2.0F && mx <= scrubberThumbX + scrubberThumbW + 2.0F) {
+                scrubberGrabOffsetX = (float) mx - scrubberThumbX;
+            } else {
+                scrubberGrabOffsetX = scrubberThumbW * 0.5F;
+                float avail = Math.max(1.0F, scrubberTrackW - scrubberThumbW);
+                float pct = clamp(((float) mx - scrubberGrabOffsetX - scrubberTrackX) / avail, 0.0F, 1.0F);
+                PASS_H_SCROLL.scrollTo(pct * PASS_H_SCROLL.maxScroll(), false);
+            }
+            draggingPassScrubber = true;
+            return true;
+        }
+
+        // 2. 在线奖励横向滚动条滑块拖动
+        if (subView == SUBVIEW_MAIN && activeTab == TAB_ONLINE) {
+            if (tryStartOnlineScrubberDrag(1, ONLINE_DAILY_H_SCROLL, onlineDailyBar, (float) mx, (float) my)
+                    || tryStartOnlineScrubberDrag(2, ONLINE_WEEKLY_H_SCROLL, onlineWeeklyBar, (float) mx, (float) my)) {
+                return true;
+            }
+        }
+
         if (subView == SUBVIEW_MAIN && activeTab == TAB_PASS
                 && inRect((float) mx, (float) my, passViewportX, passViewportY, passViewportW, passViewportH)) {
             draggingPassCanvas = true;
@@ -1891,9 +2311,46 @@ public final class QuestAddonPage implements AddonPage {
         return false;
     }
 
+    private boolean tryStartOnlineScrubberDrag(int which, ScrollController scroll, float[] bar, float mx, float my) {
+        if (bar[2] <= 0.0F || scroll.maxScroll() <= 1.0F) {
+            return false;
+        }
+        if (!inRect(mx, my, bar[0], bar[1] - 2.0F, bar[2], bar[3] + 4.0F)) {
+            return false;
+        }
+        float thumbX = bar[4];
+        float thumbW = bar[5];
+        if (mx >= thumbX - 2.0F && mx <= thumbX + thumbW + 2.0F) {
+            onlineScrubberGrabX = mx - thumbX;
+        } else {
+            onlineScrubberGrabX = thumbW * 0.5F;
+            float avail = Math.max(1.0F, bar[2] - thumbW);
+            float pct = clamp((mx - onlineScrubberGrabX - bar[0]) / avail, 0.0F, 1.0F);
+            scroll.scrollTo(pct * scroll.maxScroll(), false);
+        }
+        draggingOnlineScrubber = which;
+        return true;
+    }
+
     @Override
     public boolean mouseDragged(AddonFrame f, double mx, double my, int button, double dx, double dy) {
         if (subView == SUBVIEW_ADMIN && adminView.mouseDragged(mx, my, button, dx, dy)) {
+            return true;
+        }
+        if (draggingPassScrubber && subView == SUBVIEW_MAIN && activeTab == TAB_PASS) {
+            float avail = Math.max(1.0F, scrubberTrackW - scrubberThumbW);
+            float pct = clamp(((float) mx - scrubberGrabOffsetX - scrubberTrackX) / avail, 0.0F, 1.0F);
+            PASS_H_SCROLL.scrollTo(pct * PASS_H_SCROLL.maxScroll(), false);
+            return true;
+        }
+        if (draggingOnlineScrubber != 0 && subView == SUBVIEW_MAIN && activeTab == TAB_ONLINE) {
+            ScrollController scroll = draggingOnlineScrubber == 2 ? ONLINE_WEEKLY_H_SCROLL : ONLINE_DAILY_H_SCROLL;
+            float[] bar = draggingOnlineScrubber == 2 ? onlineWeeklyBar : onlineDailyBar;
+            if (bar[2] > 0.0F && scroll.maxScroll() > 1.0F) {
+                float avail = Math.max(1.0F, bar[2] - bar[5]);
+                float pct = clamp(((float) mx - onlineScrubberGrabX - bar[0]) / avail, 0.0F, 1.0F);
+                scroll.scrollTo(pct * scroll.maxScroll(), false);
+            }
             return true;
         }
         if (draggingPassCanvas && subView == SUBVIEW_MAIN && activeTab == TAB_PASS) {
@@ -1909,6 +2366,14 @@ public final class QuestAddonPage implements AddonPage {
     @Override
     public boolean mouseReleased(AddonFrame f, double mx, double my, int button) {
         if (subView == SUBVIEW_ADMIN && adminView.mouseReleased(mx, my, button)) {
+            return true;
+        }
+        if (draggingPassScrubber) {
+            draggingPassScrubber = false;
+            return true;
+        }
+        if (draggingOnlineScrubber != 0) {
+            draggingOnlineScrubber = 0;
             return true;
         }
         if (draggingPassCanvas) {
@@ -1953,14 +2418,63 @@ public final class QuestAddonPage implements AddonPage {
             WEEKLY_V_SCROLL.wheel(scrollY);
             return true;
         }
+        if (activeTab == TAB_ONLINE) {
+            if (onlineDailyVp[2] > 0.0F && ONLINE_DAILY_H_SCROLL.canScroll()
+                    && inRect((float) mx, (float) my, onlineDailyVp[0], onlineDailyVp[1], onlineDailyVp[2], onlineDailyVp[3])) {
+                ONLINE_DAILY_H_SCROLL.wheel(scrollY * 1.5D);
+                return true;
+            }
+            if (onlineWeeklyVp[2] > 0.0F && ONLINE_WEEKLY_H_SCROLL.canScroll()
+                    && inRect((float) mx, (float) my, onlineWeeklyVp[0], onlineWeeklyVp[1], onlineWeeklyVp[2], onlineWeeklyVp[3])) {
+                ONLINE_WEEKLY_H_SCROLL.wheel(scrollY * 1.5D);
+                return true;
+            }
+        }
         return false;
+    }
+
+    @Override
+    public void clickedOutside() {
+        adminView.blurAllInputs();
     }
 
     @Override
     public void cancelInput() {
         draggingPassCanvas = false;
+        draggingPassScrubber = false;
+        draggingOnlineScrubber = 0;
         dragAccumDist = 0.0D;
         adminView.closeInlineEditor();
+    }
+
+    // 与 Module-Shop 1.6.0 / Module-Shop-Eco 2.5.0 新增的 AddonPage 默认键盘方法签名完全对齐（省略 @Override 以兼容 1.1.0-api.jar 编译）
+    public boolean isInputFocused() {
+        return subView == SUBVIEW_ADMIN && adminView.isInputFocused();
+    }
+
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        return subView == SUBVIEW_ADMIN && adminView.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+        return subView == SUBVIEW_ADMIN && adminView.keyReleased(keyCode, scanCode, modifiers);
+    }
+
+    public boolean charTyped(char codePoint, int modifiers) {
+        return subView == SUBVIEW_ADMIN && adminView.charTyped(codePoint, modifiers);
+    }
+
+    private static QuestTargetCatalog.Kind resolveKindForType(QuestTaskType t) {
+        if (t == null) {
+            return QuestTargetCatalog.Kind.ITEM;
+        }
+        return switch (t.targetKind()) {
+            case "block" -> QuestTargetCatalog.Kind.BLOCK;
+            case "entity" -> QuestTargetCatalog.Kind.ENTITY;
+            case "biome" -> QuestTargetCatalog.Kind.BIOME;
+            case "structure" -> QuestTargetCatalog.Kind.STRUCTURE;
+            default -> QuestTargetCatalog.Kind.ITEM;
+        };
     }
 
     // ================================================================ 通用辅助

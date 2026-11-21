@@ -1,12 +1,17 @@
 package cn.autoforged.module_shop_quest.data;
 
+import cn.autoforged.module_shop_quest.QuestMod;
+import cn.autoforged.module_shop_quest.config.ConfigModels;
 import cn.autoforged.module_shop_quest.config.ConfigModels.ItemRewardSpec;
 import cn.autoforged.module_shop_quest.config.ConfigModels.PassLevelSpec;
 import cn.autoforged.module_shop_quest.config.ConfigModels.QuestDefSpec;
 import cn.autoforged.module_shop_quest.config.ConfigModels.QuestTaskType;
 import cn.autoforged.module_shop_quest.config.ConfigModels.RewardBundleSpec;
 import cn.autoforged.module_shop_quest.config.ConfigModels.SeasonPassConfig;
+import cn.autoforged.module_shop_quest.config.ConfigModels.TaskTarget;
 import cn.autoforged.module_shop_quest.config.QuestDataConfig;
+import cn.autoforged.module_shop_quest.network.ChunkedPayloadCodec;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -28,7 +33,8 @@ import net.minecraft.world.level.saveddata.SavedData;
  */
 public final class QuestSavedData extends SavedData {
     public static final String FILE_ID = "module_shop_quest";
-    public static final int SCHEMA_VERSION = 2;
+    public static final int SCHEMA_VERSION = 3;
+    private static final int SAFE_NBT_STRING_BYTES = 32_000;
 
     private String activeSeasonId = "";
     private long seasonStartEpochSec = 0L;
@@ -137,10 +143,10 @@ public final class QuestSavedData extends SavedData {
         data.activeSeasonId = root.getString("activeSeasonId");
         data.seasonStartEpochSec = root.getLong("seasonStartEpochSec");
         data.seasonEndEpochSec = root.getLong("seasonEndEpochSec");
-        data.currentSeasonConfigJson = root.getString("currentSeasonConfigJson");
+        data.currentSeasonConfigJson = readLargeString(root, "currentSeasonConfigJson", "currentSeasonConfigGzip");
         data.archivedSeasonId = root.getString("archivedSeasonId");
         data.archivedGraceUntilEpochSec = root.getLong("archivedGraceUntilEpochSec");
-        data.archivedSeasonConfigJson = root.getString("archivedSeasonConfigJson");
+        data.archivedSeasonConfigJson = readLargeString(root, "archivedSeasonConfigJson", "archivedSeasonConfigGzip");
 
         ListTag playerList = root.getList("players", Tag.TAG_COMPOUND);
         for (int i = 0; i < playerList.size(); i++) {
@@ -160,10 +166,10 @@ public final class QuestSavedData extends SavedData {
         root.putString("activeSeasonId", activeSeasonId);
         root.putLong("seasonStartEpochSec", seasonStartEpochSec);
         root.putLong("seasonEndEpochSec", seasonEndEpochSec);
-        root.putString("currentSeasonConfigJson", currentSeasonConfigJson == null ? "" : currentSeasonConfigJson);
+        writeLargeString(root, "currentSeasonConfigJson", "currentSeasonConfigGzip", currentSeasonConfigJson);
         root.putString("archivedSeasonId", archivedSeasonId);
         root.putLong("archivedGraceUntilEpochSec", archivedGraceUntilEpochSec);
-        root.putString("archivedSeasonConfigJson", archivedSeasonConfigJson == null ? "" : archivedSeasonConfigJson);
+        writeLargeString(root, "archivedSeasonConfigJson", "archivedSeasonConfigGzip", archivedSeasonConfigJson);
 
         ListTag playerList = new ListTag();
         for (Map.Entry<UUID, PlayerQuestProfile> entry : profiles.entrySet()) {
@@ -173,6 +179,39 @@ public final class QuestSavedData extends SavedData {
         }
         root.put("players", playerList);
         return root;
+    }
+
+    /** 规避 NBT StringTag 65535 字节硬上限：大 JSON 统一以 GZIP ByteArray 落盘并兼容读取旧字段。 */
+    public static void writeLargeString(CompoundTag root, String legacyKey, String gzipKey, String value) {
+        String safe = value == null ? "" : value;
+        if (safe.isEmpty()) {
+            root.putString(legacyKey, "");
+            return;
+        }
+        byte[] utf8 = safe.getBytes(StandardCharsets.UTF_8);
+        try {
+            root.putByteArray(gzipKey, ChunkedPayloadCodec.gzipCompress(utf8));
+            root.putString(legacyKey, utf8.length <= SAFE_NBT_STRING_BYTES ? safe : "");
+        } catch (Exception e) {
+            QuestMod.LOGGER.warn("[{}] 压缩存档字段 {} 失败：{}", QuestMod.MODID, gzipKey, e.getMessage());
+            if (utf8.length <= SAFE_NBT_STRING_BYTES) {
+                root.putString(legacyKey, safe);
+            }
+        }
+    }
+
+    public static String readLargeString(CompoundTag root, String legacyKey, String gzipKey) {
+        if (root.contains(gzipKey, Tag.TAG_BYTE_ARRAY)) {
+            byte[] compressed = root.getByteArray(gzipKey);
+            if (compressed.length > 0) {
+                try {
+                    return ChunkedPayloadCodec.gunzipString(compressed, ChunkedPayloadCodec.MAX_S2C_DECOMPRESSED_BYTES);
+                } catch (Exception e) {
+                    QuestMod.LOGGER.warn("[{}] 解压存档字段 {} 失败，尝试回退读取旧字段：{}", QuestMod.MODID, gzipKey, e.getMessage());
+                }
+            }
+        }
+        return root.getString(legacyKey);
     }
 
     // ================================================================ 玩家档案结构
@@ -333,7 +372,36 @@ public final class QuestSavedData extends SavedData {
         }
     }
 
-    /** 玩家已抽出的单条任务实例。 */
+    /** 单个子目标的独立进度状态（继承纯 Java {@link ConfigModels.SubTargetState} 便于离线单测复用核心算法）。 */
+    public static final class SubTargetProgress extends ConfigModels.SubTargetState {
+        public SubTargetProgress() {
+            super();
+        }
+
+        public SubTargetProgress(String target, String label, int count, int progress) {
+            super(target, label, count, progress);
+        }
+
+        public CompoundTag toTag() {
+            CompoundTag t = new CompoundTag();
+            t.putString("target", target == null ? "" : target);
+            t.putString("label", label == null ? "" : label);
+            t.putInt("count", Math.max(1, count));
+            t.putInt("progress", Math.max(0, Math.min(Math.max(1, count), progress)));
+            return t;
+        }
+
+        public static SubTargetProgress fromTag(CompoundTag t) {
+            return new SubTargetProgress(
+                    t.getString("target"),
+                    t.getString("label"),
+                    Math.max(1, t.getInt("count")),
+                    Math.max(0, t.getInt("progress"))
+            );
+        }
+    }
+
+    /** 玩家已抽出的单条任务实例（支持多子目标分项计数，100% 兼容旧存档）。 */
     public static final class QuestInstance {
         public String id = "";
         public String title = "";
@@ -344,6 +412,7 @@ public final class QuestSavedData extends SavedData {
         public String targetFilter = "";
         public int targetCount = 1;
         public int progress = 0;
+        public List<SubTargetProgress> subTargets = new ArrayList<>();
         public boolean invalidated = false;
         public boolean replacedOnce = false;
         public RewardBundleSpec fallbackReward = new RewardBundleSpec();
@@ -360,16 +429,58 @@ public final class QuestSavedData extends SavedData {
             inst.requiredMod = def.requiredMod == null ? "" : def.requiredMod;
             inst.type = def.type;
             inst.targetFilter = def.targetFilter == null ? "" : def.targetFilter;
-            inst.targetCount = Math.max(1, def.targetCount);
-            inst.progress = 0;
+            inst.subTargets = new ArrayList<>();
+            for (TaskTarget tt : def.resolvedTargets()) {
+                inst.subTargets.add(new SubTargetProgress(tt.target, tt.label, Math.max(1, tt.count), 0));
+            }
+            inst.recalculateAggregateProgress();
             inst.invalidated = false;
             inst.replacedOnce = false;
             inst.fallbackReward = def.reward != null ? def.reward : new RewardBundleSpec();
             return inst;
         }
 
+        public void ensureSubTargetsInitialized() {
+            if (subTargets == null) {
+                subTargets = new ArrayList<>();
+            }
+            if (subTargets.isEmpty()) {
+                int cnt = Math.max(1, targetCount);
+                int prog = Math.max(0, Math.min(cnt, progress));
+                subTargets.add(new SubTargetProgress(targetFilter, "", cnt, prog));
+            }
+            recalculateAggregateProgress();
+        }
+
+        public void recalculateAggregateProgress() {
+            if (subTargets == null || subTargets.isEmpty()) {
+                this.targetCount = Math.max(1, this.targetCount);
+                this.progress = Math.max(0, Math.min(this.targetCount, this.progress));
+                return;
+            }
+            int totalTarget = 0;
+            int totalProgress = 0;
+            for (SubTargetProgress st : subTargets) {
+                if (st == null) {
+                    continue;
+                }
+                st.count = Math.max(1, st.count);
+                st.progress = Math.max(0, Math.min(st.count, st.progress));
+                totalTarget += st.count;
+                totalProgress += st.progress;
+            }
+            this.targetCount = Math.max(1, totalTarget);
+            this.progress = Math.max(0, Math.min(this.targetCount, totalProgress));
+        }
+
         public boolean isCompleted() {
-            return !invalidated && progress >= Math.max(1, targetCount);
+            if (invalidated) {
+                return false;
+            }
+            if (subTargets != null && !subTargets.isEmpty()) {
+                return ConfigModels.SubTargetState.allCompleted(subTargets);
+            }
+            return progress >= Math.max(1, targetCount);
         }
 
         public QuestTaskType parsedType() {
@@ -377,23 +488,48 @@ public final class QuestSavedData extends SavedData {
         }
 
         public boolean matchesFilter(String actualKey) {
-            if (targetFilter == null || targetFilter.isBlank() || "*".equals(targetFilter.trim())) {
-                return true;
-            }
-            if (actualKey == null || actualKey.isBlank()) {
-                return false;
-            }
-            String actual = actualKey.toLowerCase(java.util.Locale.ROOT);
-            for (String token : targetFilter.toLowerCase(java.util.Locale.ROOT).split("\\|")) {
-                String t = token.trim();
-                if (!t.isEmpty() && (actual.equals(t) || actual.contains(t))) {
+            return matchesFilter(actualKey, null);
+        }
+
+        public boolean matchesFilter(String actualKey, Set<String> actualTags) {
+            ensureSubTargetsInitialized();
+            for (SubTargetProgress st : subTargets) {
+                if (st != null && st.matches(actualKey, actualTags)) {
                     return true;
                 }
             }
             return false;
         }
 
+        public boolean advanceProgress(String actualKey, Set<String> actualTags, int amount,
+                                       boolean requireEnemyForWildcard, boolean entityIsEnemy) {
+            if (invalidated || amount <= 0 || isCompleted()) {
+                return false;
+            }
+            ensureSubTargetsInitialized();
+            boolean anyChanged = ConfigModels.SubTargetState.advanceAll(
+                    subTargets, actualKey, actualTags, amount, requireEnemyForWildcard, entityIsEnemy);
+            if (anyChanged) {
+                recalculateAggregateProgress();
+            }
+            return anyChanged;
+        }
+
+        public int consumeSubmittedItem(String itemId, Set<String> itemTags, int availableCount, int targetIndex) {
+            if (invalidated || availableCount <= 0 || isCompleted()) {
+                return 0;
+            }
+            ensureSubTargetsInitialized();
+            int consumed = ConfigModels.SubTargetState.consumeSubmittedItem(
+                    subTargets, itemId, itemTags, availableCount, targetIndex);
+            if (consumed > 0) {
+                recalculateAggregateProgress();
+            }
+            return consumed;
+        }
+
         public CompoundTag toTag() {
+            ensureSubTargetsInitialized();
             CompoundTag t = new CompoundTag();
             t.putString("id", id);
             t.putString("title", title);
@@ -406,6 +542,15 @@ public final class QuestSavedData extends SavedData {
             t.putInt("progress", progress);
             t.putBoolean("invalidated", invalidated);
             t.putBoolean("replacedOnce", replacedOnce);
+
+            ListTag stList = new ListTag();
+            for (SubTargetProgress st : subTargets) {
+                if (st != null) {
+                    stList.add(st.toTag());
+                }
+            }
+            t.put("subTargets", stList);
+
             t.putLong("rMoney", fallbackReward != null ? fallbackReward.money : 0L);
             t.putLong("rPoints", fallbackReward != null ? fallbackReward.points : 0L);
             ListTag itemsTag = new ListTag();
@@ -435,6 +580,16 @@ public final class QuestSavedData extends SavedData {
             q.progress = Math.max(0, t.getInt("progress"));
             q.invalidated = t.getBoolean("invalidated");
             q.replacedOnce = t.getBoolean("replacedOnce");
+
+            q.subTargets = new ArrayList<>();
+            if (t.contains("subTargets", Tag.TAG_LIST)) {
+                ListTag stList = t.getList("subTargets", Tag.TAG_COMPOUND);
+                for (int i = 0; i < stList.size(); i++) {
+                    q.subTargets.add(SubTargetProgress.fromTag(stList.getCompound(i)));
+                }
+            }
+            q.ensureSubTargetsInitialized();
+
             List<ItemRewardSpec> items = new ArrayList<>();
             ListTag itemsTag = t.getList("rItems", Tag.TAG_COMPOUND);
             for (int i = 0; i < itemsTag.size(); i++) {

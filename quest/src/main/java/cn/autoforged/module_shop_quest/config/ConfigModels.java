@@ -272,6 +272,9 @@ public final class ConfigModels {
         VANILLA_KILL_MOB(false, false),
         VANILLA_CRAFT_ITEM(false, false),
         VANILLA_FISH(false, false),
+        SUBMIT_ITEM(false, false),
+        VISIT_BIOME(false, false),
+        VISIT_STRUCTURE(false, false),
         CUSTOM_EVENT(true, false),
         HIGH_RISK_FORBIDDEN(true, true);
 
@@ -291,6 +294,23 @@ public final class ConfigModels {
             return forbiddenInDaily;
         }
 
+        /**
+         * 返回该任务行为对应的目标选择器类别（供客户端目标选择器联动）：
+         * {@code "item" | "block" | "entity" | "biome" | "structure" | "any"}。
+         */
+        public String targetKind() {
+            return switch (this) {
+                case SUBMIT_ITEM, VANILLA_CRAFT_ITEM, VANILLA_FISH,
+                        SHOP_BUY_DAILY, SHOP_BUY_MALL, SHOP_BUY_ANY,
+                        SHOP_SELL_BUYBACK, SHOP_SHIPPING_SELL, STALL_BUY, STALL_LIST -> "item";
+                case VANILLA_BREAK_BLOCK -> "block";
+                case VANILLA_KILL_MOB -> "entity";
+                case VISIT_BIOME -> "biome";
+                case VISIT_STRUCTURE -> "structure";
+                default -> "any";
+            };
+        }
+
         public static QuestTaskType fromName(String raw) {
             if (raw == null || raw.isBlank()) {
                 return null;
@@ -300,12 +320,280 @@ public final class ConfigModels {
                     || norm.contains("MUST_WIN")) {
                 return HIGH_RISK_FORBIDDEN;
             }
+            switch (norm) {
+                case "KILL_ENTITY", "KILL_MOB" -> {
+                    return VANILLA_KILL_MOB;
+                }
+                case "MINE_BLOCK", "BREAK_BLOCK" -> {
+                    return VANILLA_BREAK_BLOCK;
+                }
+                case "CRAFT_ITEM", "CRAFT" -> {
+                    return VANILLA_CRAFT_ITEM;
+                }
+                case "FISH", "FISHING" -> {
+                    return VANILLA_FISH;
+                }
+                case "SUBMIT", "ITEM_SUBMIT" -> {
+                    return SUBMIT_ITEM;
+                }
+                case "BIOME", "REACH_BIOME" -> {
+                    return VISIT_BIOME;
+                }
+                case "STRUCTURE", "REACH_STRUCTURE" -> {
+                    return VISIT_STRUCTURE;
+                }
+                default -> {
+                }
+            }
             try {
                 return QuestTaskType.valueOf(norm);
             } catch (IllegalArgumentException e) {
                 return null;
             }
         }
+    }
+
+    /**
+     * 任务多子目标项（类 FTB Quests）：支持单任务配置多个独立目标与需求数量（如击杀僵尸 5 只 + 骷髅 3 只）。
+     */
+    public static final class TaskTarget {
+        /** 目标匹配标识：注册名（如 {@code minecraft:zombie}）、标签（{@code #minecraft:ores}）、通配符空/{@code *} 或 {@code |} 分隔。 */
+        public String target = "";
+        /** 可选展示名（留空由客户端按注册表译名或 target 原文展示）。 */
+        public String label = "";
+        /** 该子目标独立需求数量（>= 1）。 */
+        public int count = 1;
+
+        public TaskTarget() {
+        }
+
+        public TaskTarget(String target, int count) {
+            this(target, "", count);
+        }
+
+        public TaskTarget(String target, String label, int count) {
+            this.target = target == null ? "" : target.trim();
+            this.label = label == null ? "" : label.trim();
+            this.count = Math.max(1, count);
+        }
+
+        public TaskTarget copy() {
+            return new TaskTarget(target, label, count);
+        }
+
+        public boolean isWildcard() {
+            return isWildcardPattern(target);
+        }
+
+        public boolean matches(String actualKey) {
+            return matchesTargetPattern(target, actualKey, null);
+        }
+
+        public boolean matches(String actualKey, Set<String> actualTags) {
+            return matchesTargetPattern(target, actualKey, actualTags);
+        }
+    }
+
+    /**
+     * 纯 Java 多子目标进度状态与分批提交/事件推进核（供 {@code QuestSavedData.QuestInstance} 与离线单测共用）。
+     */
+    public static class SubTargetState {
+        public String target = "";
+        public String label = "";
+        public int count = 1;
+        public int progress = 0;
+
+        public SubTargetState() {
+        }
+
+        public SubTargetState(String target, String label, int count, int progress) {
+            this.target = target == null ? "" : target.trim();
+            this.label = label == null ? "" : label.trim();
+            this.count = Math.max(1, count);
+            this.progress = Math.max(0, Math.min(this.count, progress));
+        }
+
+        public boolean isCompleted() {
+            return progress >= Math.max(1, count);
+        }
+
+        public int remaining() {
+            return Math.max(0, Math.max(1, count) - progress);
+        }
+
+        public boolean isWildcard() {
+            return isWildcardPattern(target);
+        }
+
+        public boolean matches(String actualKey, Set<String> actualTags) {
+            return matchesTargetPattern(target, actualKey, actualTags);
+        }
+
+        public static List<SubTargetState> fromDef(QuestDefSpec def) {
+            List<TaskTarget> resolved = def.resolvedTargets();
+            List<SubTargetState> out = new ArrayList<>(resolved.size());
+            for (TaskTarget tt : resolved) {
+                out.add(new SubTargetState(tt.target, tt.label, Math.max(1, tt.count), 0));
+            }
+            return out;
+        }
+
+        public static List<SubTargetState> fromLegacy(String targetFilter, int targetCount, int progress) {
+            int cnt = Math.max(1, targetCount);
+            int prog = Math.max(0, Math.min(cnt, progress));
+            List<SubTargetState> out = new ArrayList<>(1);
+            out.add(new SubTargetState(targetFilter, "", cnt, prog));
+            return out;
+        }
+
+        public static boolean allCompleted(List<? extends SubTargetState> states) {
+            if (states == null || states.isEmpty()) {
+                return false;
+            }
+            for (SubTargetState st : states) {
+                if (st != null && !st.isCompleted()) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        public static int totalProgress(List<? extends SubTargetState> states) {
+            int sum = 0;
+            if (states != null) {
+                for (SubTargetState st : states) {
+                    if (st != null) {
+                        sum += Math.max(0, Math.min(Math.max(1, st.count), st.progress));
+                    }
+                }
+            }
+            return sum;
+        }
+
+        public static int totalCount(List<? extends SubTargetState> states) {
+            int sum = 0;
+            if (states != null) {
+                for (SubTargetState st : states) {
+                    if (st != null) {
+                        sum += Math.max(1, st.count);
+                    }
+                }
+            }
+            return Math.max(1, sum);
+        }
+
+        public static boolean advanceAll(List<? extends SubTargetState> states, String actualKey,
+                                         Set<String> actualTags, int amount,
+                                         boolean requireEnemyForWildcard, boolean entityIsEnemy) {
+            if (states == null || states.isEmpty() || amount <= 0) {
+                return false;
+            }
+            boolean anyChanged = false;
+            for (SubTargetState st : states) {
+                if (st == null || st.isCompleted()) {
+                    continue;
+                }
+                if (requireEnemyForWildcard && st.isWildcard() && !entityIsEnemy) {
+                    continue;
+                }
+                if (!st.matches(actualKey, actualTags)) {
+                    continue;
+                }
+                int next = Math.min(Math.max(1, st.count), st.progress + amount);
+                if (next > st.progress) {
+                    st.progress = next;
+                    anyChanged = true;
+                }
+            }
+            return anyChanged;
+        }
+
+        public static int consumeSubmittedItem(List<? extends SubTargetState> states, String itemId,
+                                               Set<String> itemTags, int availableCount, int targetIndex) {
+            if (states == null || states.isEmpty() || availableCount <= 0) {
+                return 0;
+            }
+            int remainingAvailable = availableCount;
+            int consumed = 0;
+            for (int i = 0; i < states.size() && remainingAvailable > 0; i++) {
+                if (targetIndex >= 0 && i != targetIndex) {
+                    continue;
+                }
+                SubTargetState st = states.get(i);
+                if (st == null || st.isCompleted()) {
+                    continue;
+                }
+                if (!st.matches(itemId, itemTags)) {
+                    continue;
+                }
+                int take = Math.min(st.remaining(), remainingAvailable);
+                if (take > 0) {
+                    st.progress += take;
+                    remainingAvailable -= take;
+                    consumed += take;
+                }
+            }
+            return consumed;
+        }
+    }
+
+    public static boolean isWildcardPattern(String pattern) {
+        return pattern == null || pattern.isBlank() || "*".equals(pattern.trim());
+    }
+
+    /**
+     * 通用目标匹配：支持通配符（空 / {@code *}）、管道多选（{@code a|b}）、标签匹配（{@code #namespace:tag}）、
+     * 完整注册名精确匹配（含 {@code :}）以及旧版子串匹配（如 {@code _ore}）。
+     */
+    public static boolean matchesTargetPattern(String pattern, String actualKey, Set<String> actualTags) {
+        if (isWildcardPattern(pattern)) {
+            return true;
+        }
+        String actual = actualKey == null ? "" : actualKey.trim().toLowerCase(Locale.ROOT);
+        for (String rawToken : pattern.toLowerCase(Locale.ROOT).split("\\|")) {
+            String t = rawToken.trim();
+            if (t.isEmpty()) {
+                continue;
+            }
+            if ("*".equals(t)) {
+                return true;
+            }
+            if (t.startsWith("#")) {
+                String tagId = t.substring(1).trim();
+                if (tagId.isEmpty()) {
+                    continue;
+                }
+                if (actualTags != null && !actualTags.isEmpty()) {
+                    for (String actualTag : actualTags) {
+                        if (actualTag == null) {
+                            continue;
+                        }
+                        String normTag = actualTag.trim().toLowerCase(Locale.ROOT);
+                        if (normTag.startsWith("#")) {
+                            normTag = normTag.substring(1);
+                        }
+                        if (normTag.equals(tagId)) {
+                            return true;
+                        }
+                    }
+                }
+                if (!actual.isEmpty() && (actual.equals(t) || actual.equals(tagId))) {
+                    return true;
+                }
+                continue;
+            }
+            if (actual.isEmpty()) {
+                continue;
+            }
+            if (t.contains(":")) {
+                if (actual.equals(t) || (actual.indexOf(' ') >= 0 && actual.contains(t))) {
+                    return true;
+                }
+            } else if (actual.equals(t) || actual.contains(t)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static final class QuestDefSpec {
@@ -317,6 +605,8 @@ public final class ConfigModels {
         public String type = "SHOP_SIGN_IN";
         public String targetFilter = "";
         public int targetCount = 1;
+        /** 多子目标列表；非空时优先使用，为空时自动兼容旧版 {@code targetFilter} + {@code targetCount}。 */
+        public List<TaskTarget> targets = new ArrayList<>();
         public int weight = 10;
         public RewardBundleSpec reward = new RewardBundleSpec();
 
@@ -338,21 +628,98 @@ public final class ConfigModels {
             this.reward = reward;
         }
 
+        public QuestDefSpec(String id, String title, String description, String categoryTag,
+                            String requiredMod, QuestTaskType type, List<TaskTarget> targets,
+                            int weight, RewardBundleSpec reward) {
+            this.id = id;
+            this.title = title;
+            this.description = description;
+            this.categoryTag = categoryTag;
+            this.requiredMod = requiredMod == null ? "" : requiredMod;
+            this.type = type.name();
+            if (targets != null) {
+                for (TaskTarget tt : targets) {
+                    if (tt != null) {
+                        this.targets.add(tt.copy());
+                    }
+                }
+            }
+            this.weight = Math.max(1, weight);
+            this.reward = reward;
+            syncLegacyFieldsFromTargets();
+        }
+
         public QuestTaskType parsedType() {
             return QuestTaskType.fromName(type);
         }
 
+        /** 解析生效的子目标列表（若未配置多目标，自动由旧字段 targetFilter/targetCount 合成单项）。 */
+        public List<TaskTarget> resolvedTargets() {
+            if (targets != null && !targets.isEmpty()) {
+                List<TaskTarget> out = new ArrayList<>(targets.size());
+                for (TaskTarget t : targets) {
+                    if (t != null) {
+                        out.add(new TaskTarget(t.target, t.label, Math.max(1, t.count)));
+                    }
+                }
+                if (!out.isEmpty()) {
+                    return out;
+                }
+            }
+            return List.of(new TaskTarget(targetFilter == null ? "" : targetFilter, "", Math.max(1, targetCount)));
+        }
+
+        public int totalTargetCount() {
+            int sum = 0;
+            for (TaskTarget t : resolvedTargets()) {
+                sum += Math.max(1, t.count);
+            }
+            return Math.max(1, sum);
+        }
+
+        public boolean hasMultiTargets() {
+            return targets != null && targets.size() > 1;
+        }
+
+        /** 双向同步：有 targets 时同步回写旧字段 targetFilter/targetCount，保证旧展示/统计零破坏。 */
+        public void syncLegacyFieldsFromTargets() {
+            if (targets != null && !targets.isEmpty()) {
+                List<TaskTarget> cleaned = new ArrayList<>(targets.size());
+                int sum = 0;
+                List<String> keys = new ArrayList<>();
+                for (TaskTarget t : targets) {
+                    if (t == null) {
+                        continue;
+                    }
+                    t.target = t.target == null ? "" : t.target.trim();
+                    t.label = t.label == null ? "" : t.label.trim();
+                    t.count = Math.max(1, t.count);
+                    cleaned.add(t);
+                    sum += t.count;
+                    if (!t.target.isEmpty()) {
+                        keys.add(t.target);
+                    }
+                }
+                targets = cleaned;
+                if (!cleaned.isEmpty()) {
+                    this.targetCount = Math.max(1, sum);
+                    this.targetFilter = cleaned.size() == 1
+                            ? cleaned.get(0).target
+                            : String.join("|", keys);
+                    return;
+                }
+            }
+            this.targetFilter = this.targetFilter == null ? "" : this.targetFilter.trim();
+            this.targetCount = Math.max(1, this.targetCount);
+        }
+
         public boolean matchesFilter(String actualKey) {
-            if (targetFilter == null || targetFilter.isBlank() || "*".equals(targetFilter.trim())) {
-                return true;
-            }
-            if (actualKey == null || actualKey.isBlank()) {
-                return false;
-            }
-            String actual = actualKey.toLowerCase(Locale.ROOT);
-            for (String token : targetFilter.toLowerCase(Locale.ROOT).split("\\|")) {
-                String t = token.trim();
-                if (!t.isEmpty() && (actual.equals(t) || actual.contains(t))) {
+            return matchesFilter(actualKey, null);
+        }
+
+        public boolean matchesFilter(String actualKey, Set<String> actualTags) {
+            for (TaskTarget t : resolvedTargets()) {
+                if (t.matches(actualKey, actualTags)) {
                     return true;
                 }
             }

@@ -2,16 +2,24 @@ package cn.autoforged.module_shop_quest.server;
 
 import cn.autoforged.module_shop_quest.QuestMod;
 import cn.autoforged.module_shop_quest.config.ConfigModels.QuestDefSpec;
+import cn.autoforged.module_shop_quest.config.ConfigModels.TaskTarget;
 import cn.autoforged.module_shop_quest.config.QuestDataConfig;
 import cn.autoforged.module_shop_quest.data.QuestSavedData;
 import cn.autoforged.module_shop_quest.data.QuestSavedData.PlayerQuestProfile;
 import cn.autoforged.module_shop_quest.data.QuestSavedData.QuestInstance;
+import cn.autoforged.module_shop_quest.data.QuestSavedData.SubTargetProgress;
 import cn.autoforged.module_shop_quest.network.QuestNetwork;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -34,13 +42,70 @@ public final class QuestAdminService {
         sendAdminConfigPacket(player);
     }
 
+    /** 向管理员客户端单独下发服务端动态注册表候选（Biome / Structure / Tags）。 */
+    public static void handleFetchRegistries(ServerPlayer player) {
+        if (!player.hasPermissions(2)) {
+            QuestNetwork.sendActionResult(player, false, "msg.module_shop_quest.no_permission", "error", false);
+            return;
+        }
+        CompoundTag out = new CompoundTag();
+        out.putString("type", "admin_registries");
+        appendDynamicRegistryCandidates(out, player.server.registryAccess());
+        QuestNetwork.sendToPlayer(player, out);
+    }
+
     public static void sendAdminConfigPacket(ServerPlayer player) {
         CompoundTag out = new CompoundTag();
         out.putString("type", "admin_config");
         out.putString("passJson", QuestDataConfig.toCompactJson(QuestDataConfig.seasonPass()));
         out.putString("poolsJson", QuestDataConfig.toCompactJson(QuestDataConfig.questPools()));
         out.putString("onlineJson", QuestDataConfig.toCompactJson(QuestDataConfig.onlineRewards()));
+        appendDynamicRegistryCandidates(out, player.server.registryAccess());
         QuestNetwork.sendToPlayer(player, out);
+    }
+
+    private static void appendDynamicRegistryCandidates(CompoundTag out, RegistryAccess registries) {
+        List<String> biomeIds = new ArrayList<>();
+        List<String> biomeTags = new ArrayList<>();
+        List<String> structureIds = new ArrayList<>();
+        List<String> structureTags = new ArrayList<>();
+        List<String> entityTags = new ArrayList<>();
+
+        try {
+            registries.registry(Registries.BIOME).ifPresent(reg -> {
+                reg.keySet().forEach(rl -> biomeIds.add(rl.toString()));
+                reg.getTagNames().forEach(tk -> biomeTags.add("#" + tk.location()));
+            });
+            registries.registry(Registries.STRUCTURE).ifPresent(reg -> {
+                reg.keySet().forEach(rl -> structureIds.add(rl.toString()));
+                reg.getTagNames().forEach(tk -> structureTags.add("#" + tk.location()));
+            });
+            BuiltInRegistries.ENTITY_TYPE.getTagNames().forEach(tk -> entityTags.add("#" + tk.location()));
+        } catch (Exception e) {
+            QuestMod.LOGGER.warn("[{}] 收集服务端动态注册表候选失败：{}", QuestMod.MODID, e.getMessage());
+        }
+
+        Collections.sort(biomeIds);
+        Collections.sort(biomeTags);
+        Collections.sort(structureIds);
+        Collections.sort(structureTags);
+        Collections.sort(entityTags);
+
+        out.put("biomeIds", toStringListTag(biomeIds));
+        out.put("structureIds", toStringListTag(structureIds));
+        out.put("biomeTags", toStringListTag(biomeTags));
+        out.put("structureTags", toStringListTag(structureTags));
+        out.put("entityTags", toStringListTag(entityTags));
+    }
+
+    private static ListTag toStringListTag(List<String> items) {
+        ListTag list = new ListTag();
+        for (String s : items) {
+            if (s != null && !s.isBlank()) {
+                list.add(StringTag.valueOf(s));
+            }
+        }
+        return list;
     }
 
     /** 接收管理员在 GUI 内编辑后的配置，落盘保存并刷新全服玩家视图。 */
@@ -125,18 +190,58 @@ public final class QuestAdminService {
             if (def == null) {
                 continue;
             }
+            q.ensureSubTargetsInitialized();
+            List<TaskTarget> newTargets = def.resolvedTargets();
+            boolean targetsDiffer = subTargetsDiffer(q.subTargets, newTargets);
+
             if (!def.title.equals(q.title) || !def.description.equals(q.description)
-                    || def.targetCount != q.targetCount) {
+                    || !def.type.equals(q.type) || targetsDiffer) {
                 q.title = def.title;
                 q.description = def.description;
-                q.targetCount = Math.max(1, def.targetCount);
                 q.type = def.type;
                 q.targetFilter = def.targetFilter == null ? "" : def.targetFilter;
                 q.requiredMod = def.requiredMod == null ? "" : def.requiredMod;
                 q.fallbackReward = def.reward;
+
+                if (targetsDiffer) {
+                    Map<String, Integer> oldProgByTarget = new HashMap<>();
+                    for (SubTargetProgress oldSt : q.subTargets) {
+                        if (oldSt != null) {
+                            oldProgByTarget.putIfAbsent(oldSt.target == null ? "" : oldSt.target, oldSt.progress);
+                        }
+                    }
+                    List<SubTargetProgress> rebuilt = new ArrayList<>(newTargets.size());
+                    for (int i = 0; i < newTargets.size(); i++) {
+                        TaskTarget nt = newTargets.get(i);
+                        int prevProg = oldProgByTarget.getOrDefault(nt.target,
+                                (i < q.subTargets.size() && q.subTargets.get(i) != null && newTargets.size() == q.subTargets.size())
+                                        ? q.subTargets.get(i).progress : 0);
+                        rebuilt.add(new SubTargetProgress(nt.target, nt.label, Math.max(1, nt.count),
+                                Math.min(Math.max(1, nt.count), Math.max(0, prevProg))));
+                    }
+                    q.subTargets = rebuilt;
+                    q.recalculateAggregateProgress();
+                }
                 changed = true;
             }
         }
         return changed;
+    }
+
+    private static boolean subTargetsDiffer(List<SubTargetProgress> current, List<TaskTarget> desired) {
+        if (current == null || current.size() != desired.size()) {
+            return true;
+        }
+        for (int i = 0; i < desired.size(); i++) {
+            SubTargetProgress c = current.get(i);
+            TaskTarget d = desired.get(i);
+            if (c == null || d == null) {
+                return true;
+            }
+            if (!c.target.equals(d.target) || !c.label.equals(d.label) || c.count != d.count) {
+                return true;
+            }
+        }
+        return false;
     }
 }

@@ -35,6 +35,15 @@ public final class QuestClientState {
     ) {
     }
 
+    public record TargetProgress(
+            String target,
+            String label,
+            int progress,
+            int count,
+            boolean completed
+    ) {
+    }
+
     public record QuestRow(
             String id,
             String period,
@@ -42,10 +51,13 @@ public final class QuestClientState {
             String desc,
             String category,
             String requiredMod,
+            String taskType,
+            boolean canSubmit,
             int progress,
             int target,
             boolean invalidated,
             boolean claimed,
+            List<TargetProgress> targets,
             RewardView reward
     ) {
         public boolean completed() {
@@ -133,6 +145,10 @@ public final class QuestClientState {
     private static SeasonPassConfig editPass;
     private static QuestPoolsConfig editPools;
     private static OnlineRewardsConfig editOnline;
+    private static List<String> syncedBiomes = List.of();
+    private static List<String> syncedStructures = List.of();
+    private static List<String> syncedEntityTags = List.of();
+    private static int worldRegistryRevision = 0;
 
     private static String bannerMessage = "";
     private static boolean bannerOk = true;
@@ -148,6 +164,10 @@ public final class QuestClientState {
         editPass = null;
         editPools = null;
         editOnline = null;
+        syncedBiomes = List.of();
+        syncedStructures = List.of();
+        syncedEntityTags = List.of();
+        worldRegistryRevision++;
         passRows = List.of();
         dailyRows = List.of();
         weeklyRows = List.of();
@@ -166,11 +186,70 @@ public final class QuestClientState {
         adminRevision++;
     }
 
+    public static synchronized void applyAdminConfig(CompoundTag tag) {
+        if (tag == null) {
+            return;
+        }
+        applyAdminConfig(
+                tag.getString("passJson"),
+                tag.getString("poolsJson"),
+                tag.getString("onlineJson")
+        );
+        applyAdminRegistries(tag);
+    }
+
+    public static synchronized void applyAdminRegistries(CompoundTag tag) {
+        if (tag == null) {
+            return;
+        }
+        boolean changed = false;
+        if (tag.contains("biomeIds") || tag.contains("biomeTags")) {
+            List<String> biomes = new ArrayList<>();
+            readStringList(tag, "biomeIds", biomes);
+            readStringList(tag, "biomeTags", biomes);
+            syncedBiomes = Collections.unmodifiableList(biomes);
+            changed = true;
+        }
+        if (tag.contains("structureIds") || tag.contains("structureTags")) {
+            List<String> structs = new ArrayList<>();
+            readStringList(tag, "structureIds", structs);
+            readStringList(tag, "structureTags", structs);
+            syncedStructures = Collections.unmodifiableList(structs);
+            changed = true;
+        }
+        if (tag.contains("entityTags")) {
+            List<String> eTags = new ArrayList<>();
+            readStringList(tag, "entityTags", eTags);
+            syncedEntityTags = Collections.unmodifiableList(eTags);
+            changed = true;
+        }
+        if (changed) {
+            worldRegistryRevision++;
+        }
+    }
+
+    private static void readStringList(CompoundTag tag, String key, List<String> out) {
+        if (!tag.contains(key, Tag.TAG_LIST)) {
+            return;
+        }
+        ListTag list = tag.getList(key, Tag.TAG_STRING);
+        for (int i = 0; i < list.size(); i++) {
+            String s = list.getString(i);
+            if (s != null && !s.isBlank()) {
+                out.add(s.trim());
+            }
+        }
+    }
+
     public static boolean adminLoaded() { return adminLoaded; }
     public static int adminRevision() { return adminRevision; }
     public static SeasonPassConfig editPass() { return editPass; }
     public static QuestPoolsConfig editPools() { return editPools; }
     public static OnlineRewardsConfig editOnline() { return editOnline; }
+    public static List<String> syncedBiomes() { return syncedBiomes; }
+    public static List<String> syncedStructures() { return syncedStructures; }
+    public static List<String> syncedEntityTags() { return syncedEntityTags; }
+    public static int worldRegistryRevision() { return worldRegistryRevision; }
 
     public static synchronized void applySnapshot(CompoundTag root) {
         if (root == null || root.isEmpty()) {
@@ -291,6 +370,23 @@ public final class QuestClientState {
         List<QuestRow> list = new ArrayList<>(tag.size());
         for (int i = 0; i < tag.size(); i++) {
             CompoundTag t = tag.getCompound(i);
+            List<TargetProgress> targets = new ArrayList<>();
+            if (t.contains("targets", Tag.TAG_LIST)) {
+                ListTag tList = t.getList("targets", Tag.TAG_COMPOUND);
+                for (int k = 0; k < tList.size(); k++) {
+                    CompoundTag tt = tList.getCompound(k);
+                    int cnt = Math.max(1, tt.getInt("count"));
+                    int prog = Math.max(0, tt.getInt("progress"));
+                    boolean comp = tt.getBoolean("completed") || prog >= cnt;
+                    targets.add(new TargetProgress(
+                            tt.getString("target"),
+                            tt.getString("label"),
+                            prog,
+                            cnt,
+                            comp
+                    ));
+                }
+            }
             list.add(new QuestRow(
                     t.getString("id"),
                     t.getString("period"),
@@ -298,10 +394,13 @@ public final class QuestClientState {
                     t.getString("desc"),
                     t.getString("category"),
                     t.getString("requiredMod"),
+                    t.getString("type"),
+                    t.getBoolean("canSubmit"),
                     t.getInt("progress"),
                     t.getInt("target"),
                     t.getBoolean("invalidated"),
                     t.getBoolean("claimed"),
+                    Collections.unmodifiableList(targets),
                     decodeReward(t.getCompound("reward"))
             ));
         }
