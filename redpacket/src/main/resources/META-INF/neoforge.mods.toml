@@ -4,8 +4,8 @@ license="MIT"
 
 [[mods]]
 modId="module_shop_redpacket"
-version="1.1.0"
-displayName="module-shop: Red envelope"
+version="${mod_version}"
+displayName="${mod_name} ${mod_version} for NeoForge ${minecraft_version}"
 authors="ChatMiaoPT-Meow"
 description='''
 模块商店（Module Shop）附属：红包。

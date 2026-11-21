@@ -68,6 +68,7 @@ public final class QuestMod {
         QuestDataConfig.loadOrCreateAll(null);
         OnlineTimeService.resetRuntime();
         QuestEventBridge.resetRuntime();
+        QuestNetwork.resetRuntime();
         QuestManager.ensureSeasonInitialized(event.getServer());
         LOGGER.info("[{}] 服务端配置与赛季状态初始化完成（当前赛季：{}）",
                 MODID, QuestDataConfig.seasonPass().seasonId);
@@ -77,6 +78,7 @@ public final class QuestMod {
         OnlineTimeService.flushAll(event.getServer());
         OnlineTimeService.resetRuntime();
         QuestEventBridge.resetRuntime();
+        QuestNetwork.resetRuntime();
     }
 
     private void onServerTick(ServerTickEvent.Post event) {
@@ -103,6 +105,7 @@ public final class QuestMod {
         if (event.getEntity() instanceof ServerPlayer player) {
             OnlineTimeService.onPlayerLogout(player);
             QuestEventBridge.onPlayerLogout(player);
+            QuestNetwork.onPlayerLogout(player.getUUID());
         }
     }
 }

@@ -200,6 +200,16 @@ public final class QuestDataConfig {
                     dir.resolve("online_rewards.json"), OnlineRewardsConfig.class, createDefaultOnlineRewards(), warnings);
             validateOnlineRewards(loadedOnline, warnings);
             onlineRewards = loadedOnline;
+
+            int passBytes = toCompactJson(seasonPass).getBytes(StandardCharsets.UTF_8).length;
+            int poolsBytes = toCompactJson(questPools).getBytes(StandardCharsets.UTF_8).length;
+            int onlineBytes = toCompactJson(onlineRewards).getBytes(StandardCharsets.UTF_8).length;
+            if (passBytes >= 32 * 1024 || poolsBytes >= 32 * 1024) {
+                QuestMod.LOGGER.info(
+                        "[{}] 配置体积诊断：season_pass={}B ({}级), quest_pools={}B (日{}/周{}), online_rewards={}B（已启用 GZIP+分片安全同步）",
+                        QuestMod.MODID, passBytes, seasonPass.resolvedLevels().size(),
+                        poolsBytes, questPools.dailyPool.size(), questPools.weeklyPool.size(), onlineBytes);
+            }
         } catch (Exception e) {
             String msg = "加载配置目录失败，继续沿用内存配置：" + e.getMessage();
             warnings.add(msg);
@@ -453,6 +463,11 @@ public final class QuestDataConfig {
                 warnings.add("已剔除不合规每日任务：" + q.id + " (type=" + q.type + ")");
                 return true;
             }
+            q.type = t.name();
+            if (q.reward == null) {
+                q.reward = new RewardBundleSpec();
+            }
+            q.syncLegacyFieldsFromTargets();
             return false;
         });
         cfg.weeklyPool.removeIf(q -> {
@@ -464,6 +479,11 @@ public final class QuestDataConfig {
                 warnings.add("已剔除不合规每周任务：" + q.id + " (type=" + q.type + ")");
                 return true;
             }
+            q.type = t.name();
+            if (q.reward == null) {
+                q.reward = new RewardBundleSpec();
+            }
+            q.syncLegacyFieldsFromTargets();
             return false;
         });
     }

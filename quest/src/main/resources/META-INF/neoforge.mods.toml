@@ -4,8 +4,8 @@ license="MIT"
 
 [[mods]]
 modId="module_shop_quest"
-version="1.0.0"
-displayName="星途纪行 (Module Shop: Quest & Pass)"
+version="${mod_version}"
+displayName="${mod_name} ${mod_version} for NeoForge ${minecraft_version}"
 authors="AutoForged"
 description='''
 Module Shop 附属模组：双层积分赛季通行证（免费基础线 + 星币解锁进阶线）、每日任务、每周任务与防挂机在线时长奖励系统。支持 JSON/TOML 快速配置与游戏内热重载。

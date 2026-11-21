@@ -7,6 +7,7 @@
   "gui.module_shop_quest.tab_weekly": "每周任务",
   "gui.module_shop_quest.tab_online": "在线奖励",
   "gui.module_shop_quest.btn_claim": "领取",
+  "gui.module_shop_quest.btn_submit_item": "提交物品",
   "gui.module_shop_quest.btn_claim_short": "领取",
   "gui.module_shop_quest.btn_claim_free": "领免费",
   "gui.module_shop_quest.btn_claim_prem": "领进阶",
@@ -109,5 +110,11 @@
   "msg.module_shop_quest.empty_reward": "该档位未配置奖励",
   "msg.module_shop_quest.quest_not_found": "任务不存在或已失效",
   "msg.module_shop_quest.quest_incomplete": "任务尚未完成",
-  "msg.module_shop_quest.online_not_reached": "在线时长尚未达标"
+  "msg.module_shop_quest.online_not_reached": "在线时长尚未达标",
+  "msg.module_shop_quest.submit_no_matching_item": "背包中没有符合任务要求的物品",
+  "msg.module_shop_quest.submit_partial": "已提交部分物品，请继续收集剩余目标",
+  "msg.module_shop_quest.submit_completed": "物品提交成功，任务已完成！",
+  "msg.module_shop_quest.not_submit_quest": "该任务不是提交物品类型",
+  "msg.module_shop_quest.already_completed": "该任务已完成",
+  "msg.module_shop_quest.network_error": "网络数据包解析失败，请稍后重试"
 }

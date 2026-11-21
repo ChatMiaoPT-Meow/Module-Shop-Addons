@@ -7,6 +7,7 @@
   "gui.module_shop_quest.tab_weekly": "Weekly Quests",
   "gui.module_shop_quest.tab_online": "Online Rewards",
   "gui.module_shop_quest.btn_claim": "Claim",
+  "gui.module_shop_quest.btn_submit_item": "Submit",
   "gui.module_shop_quest.btn_claim_short": "Claim",
   "gui.module_shop_quest.btn_claim_free": "Free",
   "gui.module_shop_quest.btn_claim_prem": "Premium",
@@ -109,5 +110,11 @@
   "msg.module_shop_quest.empty_reward": "No reward configured",
   "msg.module_shop_quest.quest_not_found": "Quest not found",
   "msg.module_shop_quest.quest_incomplete": "Quest not yet completed",
-  "msg.module_shop_quest.online_not_reached": "Required online minutes not yet reached"
+  "msg.module_shop_quest.online_not_reached": "Required online minutes not yet reached",
+  "msg.module_shop_quest.submit_no_matching_item": "No matching items found in your inventory",
+  "msg.module_shop_quest.submit_partial": "Items submitted! Collect the remaining items to complete",
+  "msg.module_shop_quest.submit_completed": "All required items submitted! Quest complete!",
+  "msg.module_shop_quest.not_submit_quest": "This quest does not accept item submissions",
+  "msg.module_shop_quest.already_completed": "This quest is already completed",
+  "msg.module_shop_quest.network_error": "Network packet error, please retry"
 }
