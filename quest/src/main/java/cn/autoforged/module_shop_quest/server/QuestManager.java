@@ -15,6 +15,7 @@ import cn.autoforged.module_shop_quest.config.QuestTomlConfig;
 import cn.autoforged.module_shop_quest.data.QuestSavedData;
 import cn.autoforged.module_shop_quest.data.QuestSavedData.PlayerQuestProfile;
 import cn.autoforged.module_shop_quest.data.QuestSavedData.QuestInstance;
+import cn.autoforged.module_shop_quest.data.QuestSavedData.SubTargetProgress;
 import cn.autoforged.module_shop_quest.network.QuestNetwork;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -25,6 +26,7 @@ import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
@@ -178,7 +180,7 @@ public final class QuestManager {
             // 若玩家在跨日重置前已通过自动签到完成了今日商店签到，自动对齐签到任务进度
             var signView = ModuleShopApi.daily().signIn(player.getUUID());
             if (signView != null && signView.signedToday()) {
-                advanceList(profile.dailyQuests, QuestTaskType.SHOP_SIGN_IN, "", 1);
+                advanceList(profile.dailyQuests, QuestTaskType.SHOP_SIGN_IN, "", null, 1, true);
             }
             data.setDirty();
         }
@@ -297,9 +299,15 @@ public final class QuestManager {
         return false;
     }
 
-    /** 推进玩家任务进度（必须在服务端主线程调用）。 */
+    /** 推进玩家任务进度（兼容旧版 5 参数调用，必须在服务端主线程调用）。 */
     public static void recordProgress(MinecraftServer server, UUID playerId, QuestTaskType eventType,
                                       String targetKey, int amount) {
+        recordProgress(server, playerId, eventType, targetKey, null, amount, true);
+    }
+
+    /** 推进玩家任务进度（支持实体/方块/物品/群系/结构 Tag 匹配与多子目标分项计数）。 */
+    public static void recordProgress(MinecraftServer server, UUID playerId, QuestTaskType eventType,
+                                      String targetKey, Set<String> targetTags, int amount, boolean entityIsEnemy) {
         if (server == null || playerId == null || eventType == null || amount <= 0 || !QuestTomlConfig.ENABLED.get()) {
             return;
         }
@@ -310,8 +318,8 @@ public final class QuestManager {
         }
         PlayerQuestProfile profile = data.profile(playerId);
 
-        boolean changedDaily = advanceList(profile.dailyQuests, eventType, targetKey, amount);
-        boolean changedWeekly = advanceList(profile.weeklyQuests, eventType, targetKey, amount);
+        boolean changedDaily = advanceList(profile.dailyQuests, eventType, targetKey, targetTags, amount, entityIsEnemy);
+        boolean changedWeekly = advanceList(profile.weeklyQuests, eventType, targetKey, targetTags, amount, entityIsEnemy);
 
         if (changedDaily || changedWeekly) {
             data.setDirty();
@@ -322,7 +330,7 @@ public final class QuestManager {
     }
 
     private static boolean advanceList(List<QuestInstance> list, QuestTaskType eventType,
-                                       String targetKey, int amount) {
+                                       String targetKey, Set<String> targetTags, int amount, boolean entityIsEnemy) {
         if (list == null || list.isEmpty()) {
             return false;
         }
@@ -335,16 +343,81 @@ public final class QuestManager {
             if (qType == null || !matchesTaskType(qType, eventType)) {
                 continue;
             }
-            if (!q.matchesFilter(targetKey)) {
-                continue;
-            }
-            int next = Math.min(q.targetCount, q.progress + amount);
-            if (next > q.progress) {
-                q.progress = next;
+            boolean requireEnemyForWildcard = (qType == QuestTaskType.VANILLA_KILL_MOB);
+            if (q.advanceProgress(targetKey, targetTags, amount, requireEnemyForWildcard, entityIsEnemy)) {
                 anyChanged = true;
             }
         }
         return anyChanged;
+    }
+
+    /**
+     * 处理客户端发起的「提交物品」（{@code SUBMIT_ITEM}）请求：
+     * 扫描玩家主背包与副手，按未完成子目标依次扣除匹配物品（支持按子目标分批多次提交累计进度）。
+     */
+    public static void handleSubmitQuestItem(ServerPlayer player, String period, String questId, int targetIndex) {
+        QuestSavedData data = QuestSavedData.get(player.server);
+        ensurePlayerUpToDate(player, data);
+        PlayerQuestProfile profile = data.profile(player.getUUID());
+
+        if ("prev_daily".equalsIgnoreCase(period)) {
+            QuestNetwork.sendActionResult(player, false, "msg.module_shop_quest.grace_expired", "error", false);
+            return;
+        }
+        List<QuestInstance> list = "weekly".equalsIgnoreCase(period) ? profile.weeklyQuests : profile.dailyQuests;
+        QuestInstance target = null;
+        for (QuestInstance q : list) {
+            if (q.id.equals(questId)) {
+                target = q;
+                break;
+            }
+        }
+        if (target == null || target.invalidated) {
+            QuestNetwork.sendActionResult(player, false, "msg.module_shop_quest.quest_not_found", "error", false);
+            return;
+        }
+        if (target.parsedType() != QuestTaskType.SUBMIT_ITEM) {
+            QuestNetwork.sendActionResult(player, false, "msg.module_shop_quest.not_submit_quest", "error", false);
+            return;
+        }
+        if (target.isCompleted()) {
+            QuestNetwork.sendActionResult(player, false, "msg.module_shop_quest.already_completed", "error", true);
+            return;
+        }
+
+        target.ensureSubTargetsInitialized();
+        List<ItemStack> scanSlots = new ArrayList<>(player.getInventory().items.size() + player.getInventory().offhand.size());
+        scanSlots.addAll(player.getInventory().items);
+        scanSlots.addAll(player.getInventory().offhand);
+
+        int submittedTotal = 0;
+        for (ItemStack stack : scanSlots) {
+            if (stack == null || stack.isEmpty() || target.isCompleted()) {
+                continue;
+            }
+            String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+            Set<String> itemTags = QuestEventBridge.extractItemTags(stack);
+            int take = target.consumeSubmittedItem(itemId, itemTags, stack.getCount(), targetIndex);
+            if (take > 0) {
+                stack.shrink(take);
+                submittedTotal += take;
+            }
+        }
+
+        if (submittedTotal <= 0) {
+            QuestNetwork.sendActionResult(player, false, "msg.module_shop_quest.submit_no_matching_item", "error", false);
+            return;
+        }
+
+        target.recalculateAggregateProgress();
+        player.getInventory().setChanged();
+        player.inventoryMenu.broadcastChanges();
+        data.setDirty();
+
+        String msgKey = target.isCompleted()
+                ? "msg.module_shop_quest.submit_completed"
+                : "msg.module_shop_quest.submit_partial";
+        QuestNetwork.sendActionResult(player, true, msgKey, "claim", true);
     }
 
     private static boolean matchesTaskType(QuestTaskType questType, QuestTaskType incomingEvent) {
@@ -814,9 +887,11 @@ public final class QuestManager {
 
     private static CompoundTag encodeQuestInstance(QuestInstance q, String period, boolean claimed,
                                                    boolean weekly, HolderLookup.Provider regs) {
+        q.ensureSubTargetsInitialized();
         CompoundTag t = new CompoundTag();
         t.putString("id", q.id);
         t.putString("period", period);
+        t.putString("type", q.type == null ? "" : q.type);
         t.putString("title", "prev_daily".equals(period)
                 ? Component.translatable("gui.module_shop_quest.grace_prefix", q.title).getString()
                 : q.title);
@@ -827,6 +902,24 @@ public final class QuestManager {
         t.putInt("target", q.targetCount);
         t.putBoolean("invalidated", q.invalidated);
         t.putBoolean("claimed", claimed);
+        t.putBoolean("canSubmit", q.parsedType() == QuestTaskType.SUBMIT_ITEM
+                && !q.invalidated && !q.isCompleted() && !claimed && !"prev_daily".equals(period));
+
+        ListTag targetsTag = new ListTag();
+        for (SubTargetProgress st : q.subTargets) {
+            if (st == null) {
+                continue;
+            }
+            CompoundTag subTag = new CompoundTag();
+            subTag.putString("target", st.target == null ? "" : st.target);
+            subTag.putString("label", st.label == null ? "" : st.label);
+            subTag.putInt("progress", st.progress);
+            subTag.putInt("count", st.count);
+            subTag.putBoolean("completed", st.isCompleted());
+            targetsTag.add(subTag);
+        }
+        t.put("targets", targetsTag);
+
         t.put("reward", encodeRewardBundle(resolveLiveQuestReward(q, weekly), regs));
         return t;
     }

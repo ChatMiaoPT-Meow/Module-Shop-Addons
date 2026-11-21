@@ -99,6 +99,10 @@ public final class QuestFallbackScreen extends Screen {
                     addRenderableWidget(Button.builder(Component.translatable("gui.module_shop_quest.btn_claim"),
                             b -> QuestClient.sendClaimQuest(r.period(), r.id()))
                             .bounds(left + 360, rowY, 58, 18).build());
+                } else if (r.canSubmit()) {
+                    addRenderableWidget(Button.builder(Component.translatable("gui.module_shop_quest.btn_submit_item"),
+                            b -> QuestClient.sendSubmitQuestItem(r.period(), r.id(), -1))
+                            .bounds(left + 356, rowY, 62, 18).build());
                 }
             } else {
                 OnlineRow r = QuestClientState.onlineRows().get(rowIdx);
